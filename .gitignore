@@ -1,0 +1,23 @@
+# macOS
+.DS_Store
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Wavefunction / grid / output files (large/generated)
+*.wfn
+*.cub
+*.gbw
+*.wfx
+*.out
+*.densities
+*.densitiesinfo
+*.property.txt
+*.ges
+
+# Optional test files (if not needed for repo)
+test*.xyz
+test*.bibtex
+test*.opt
+
