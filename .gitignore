@@ -15,9 +15,31 @@ __pycache__/
 *.densitiesinfo
 *.property.txt
 *.ges
+*.tmp
+*.bas*
+*.inp
+*.bibtex
+*.mo16a.cube
+*.molden
+*.soscfv.tmp.*
+*.propint.tmp.*
+*.diisao.tmp.*
+*.diise.tmp.*
+*.diist.tmp.*
 
 # Optional test files (if not needed for repo)
 test*.xyz
 test*.bibtex
 test*.opt
+
+# Other outputs from ORCA / multiwfn / scripts
+*opt*.engrad
+*opt*.hostnames
+*opt*.sp*
+*opt*.cpscfdata.tmp.*
+*opt*.soscfv.tmp.*
+*opt*.propint.tmp.*
+*opt*.diisao.tmp.*
+*opt*.diise.tmp.*
+*opt*.diist.tmp.*
 
