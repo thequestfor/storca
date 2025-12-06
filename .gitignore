@@ -1,45 +1,9 @@
-# macOS
-.DS_Store
+# Ignore everything by default
+*
 
-# Python cache
-__pycache__/
-*.pyc
-
-# Wavefunction / grid / output files (large/generated)
-*.wfn
-*.cub
-*.gbw
-*.wfx
-*.out
-*.densities
-*.densitiesinfo
-*.property.txt
-*.ges
-*.tmp
-*.bas*
-*.inp
-*.bibtex
-*.mo16a.cube
-*.molden
-*.soscfv.tmp.*
-*.propint.tmp.*
-*.diisao.tmp.*
-*.diise.tmp.*
-*.diist.tmp.*
-
-# Optional test files (if not needed for repo)
-test*.xyz
-test*.bibtex
-test*.opt
-
-# Other outputs from ORCA / multiwfn / scripts
-*opt*.engrad
-*opt*.hostnames
-*opt*.sp*
-*opt*.cpscfdata.tmp.*
-*opt*.soscfv.tmp.*
-*opt*.propint.tmp.*
-*opt*.diisao.tmp.*
-*opt*.diise.tmp.*
-*opt*.diist.tmp.*
+# Whitelist essential files
+!README.md
+!.gitignore
+!*.py
+!src/
 

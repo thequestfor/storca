@@ -32,23 +32,27 @@ def run(
     if run_quickprops:
         print("\n=== Quick Molecular Property Estimation ===")
         from src.quickprops import analyze_xyz
-
+    
         try:
-            descriptors, properties = analyze_xyz(xyz_file)
-
+            info = analyze_xyz(xyz_file)  # single dictionary returned
+    
+            # Separate descriptors vs PubChem properties (optional)
+            descriptors = {k: info[k] for k in ["SMILES", "IUPACName", "MolecularWeight", "TPSA", "XLogP"]}
+            properties = {k: info[k] for k in ["CID", "Synonyms", "Description"]}
+    
+            # Print descriptors
             print("\nDescriptors:")
             for k, v in descriptors.items():
                 print(f"  {k}: {v}")
-
-            if properties:
-                print("\nMacroscopic Properties from PubChem:")
-                for k, v in properties.items():
-                    print(f"  {k}: {v}")
-            else:
-                print("\nNo experimental properties found in PubChem.")
-
+    
+            # Print PubChem properties
+            print("\nProperties from PubChem / Additional Info:")
+            for k, v in properties.items():
+                print(f"  {k}: {v if v else 'N/A'}")
+    
         except Exception as e:
             print(f"Failed to estimate properties for {xyz_file}: {e}")
+    
 
 
     # ----------------------
