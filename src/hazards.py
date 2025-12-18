@@ -3,16 +3,16 @@ hazards.py
 
 Hazard classification module.
 
-Phase 1: fully operational GHS extraction with H-code explanations.
-- Uses PubChem PUG-View GHS data when available
-- Falls back to estimated hazards if PubChem data unavailable
+- Uses PubChem PUG-View GHS data when available.
+- Falls back to estimated practical hazards if PubChem data unavailable.
+- Practical hazards now cover aromatics, ethers, alcohols, aldehydes, halogens, etc.
 """
 
 from __future__ import annotations
 import re
 import requests
 from typing import Dict, Optional, Set
-
+from rdkit import Chem
 
 PUBCHEM_PUGVIEW = "https://pubchem.ncbi.nlm.nih.gov/rest/pug_view/data/compound/{cid}/JSON"
 
@@ -38,38 +38,34 @@ def classify_hazards(
       - HazardStatements
       - HCodeDescriptions
       - Pictograms
-      - Flammable/Toxicity/EnvironmentalHazard (if estimated)
+      - Flammable/Toxicity/EnvironmentalHazard
+      - Advice
     """
-
-    pubchem_checked = False
-    pubchem_available = False
 
     # --- Attempt PubChem GHS extraction ---
     if cid:
-        pubchem_checked = True
         data = _fetch_pubchem_pugview(cid)
-        if data:
-            pubchem_available = _has_ghs_section(data)
+        if data and _has_ghs_section(data):
             hazards = _extract_pubchem_ghs(data)
             if hazards:
+                # Merge practical advice instead of overwriting
+                practical = estimate_practical_hazards(smiles)
                 hazards.update({
-                    "PubChemChecked": True,
-                    "PubChemGHSAvailable": True,
-                    "Flammable": None,
-                    "Toxicity": None,
-                    "EnvironmentalHazard": None
+                    "Flammable": practical["Flammable"],
+                    "Toxicity": practical["Toxicity"],
+                    "EnvironmentalHazard": practical["EnvironmentalHazard"],
+                    "Advice": practical["Advice"]
                 })
                 return hazards
 
     # --- Fallback estimation ---
-    hazards = _estimate_hazards(
-        smiles=smiles,
-        molecular_weight=molecular_weight,
-        xlogp=xlogp,
-    )
+    hazards = estimate_practical_hazards(smiles)
     hazards.update({
-        "PubChemChecked": pubchem_checked,
-        "PubChemGHSAvailable": pubchem_available,
+        "Source": "Estimated",
+        "SignalWord": None,
+        "GHSCodes": [],
+        "HCodeDescriptions": {},
+        "Pictograms": []
     })
     return hazards
 
@@ -89,11 +85,7 @@ def _fetch_pubchem_pugview(cid: int) -> Optional[dict]:
 
 
 def _has_ghs_section(data: dict) -> bool:
-    """
-    Check if a PubChem PUG-View JSON contains a GHS section.
-    """
     found = False
-
     def walk(node):
         nonlocal found
         if isinstance(node, dict):
@@ -105,16 +97,11 @@ def _has_ghs_section(data: dict) -> bool:
         elif isinstance(node, list):
             for item in node:
                 walk(item)
-
     walk(data)
     return found
 
 
 def _extract_pubchem_ghs(data: dict) -> Optional[Dict]:
-    """
-    Extract GHS hazard data from PubChem PUG-View JSON.
-    Includes H-code descriptions.
-    """
     hazard_texts: Set[str] = set()
     signal_words: Set[str] = set()
     pictograms: Set[str] = set()
@@ -124,21 +111,18 @@ def _extract_pubchem_ghs(data: dict) -> Optional[Dict]:
             name = node.get("Name")
             value = node.get("Value")
 
-            # Extract full hazard statements
             if name == "GHS Hazard Statements" and value:
                 for item in value.get("StringWithMarkup", []):
                     text = item.get("String", "").strip()
                     if text:
                         hazard_texts.add(text)
 
-            # Signal words (Danger/Warning)
             elif name == "Signal" and value:
                 for item in value.get("StringWithMarkup", []):
                     sw = item.get("String", "").strip()
                     if sw:
                         signal_words.add(sw)
 
-            # Pictograms (Irritant, Health Hazard, Environmental)
             elif name == "Pictogram(s)" and value:
                 for item in value.get("StringWithMarkup", []):
                     for markup in item.get("Markup", []):
@@ -178,77 +162,26 @@ def _extract_pubchem_ghs(data: dict) -> Optional[Dict]:
 
 
 def _select_signal_word(words: Set[str]) -> Optional[str]:
-    """
-    Prefer 'Danger' over 'Warning' if both appear.
-    """
     if "Danger" in words:
         return "Danger"
     if "Warning" in words:
         return "Warning"
     return None
 
-def estimate_practical_hazards(smiles):
-    """
-    Returns a practical lab-oriented hazard summary.
-    Flammable, Toxicity, Environmental Hazard, and short advice.
-    """
-    from rdkit import Chem
-
-    mol = Chem.MolFromSmiles(smiles)
-    hazards = {
-        "Flammable": False,
-        "Toxicity": "Low",
-        "EnvironmentalHazard": False,
-        "Advice": "Use standard PPE (gloves, goggles), avoid inhalation."
-    }
-
-    # Rough heuristics:
-    smarts_flammable = ["[OH]", "[CH3]", "[CH2]"]  # simple example
-    if any(mol.HasSubstructMatch(Chem.MolFromSmarts(s)) for s in smarts_flammable):
-        hazards["Flammable"] = True
-
-    # Functional groups that could increase toxicity
-    smarts_toxic = ["[N+]", "[C#N]", "N=O"]
-    if any(mol.HasSubstructMatch(Chem.MolFromSmarts(s)) for s in smarts_toxic):
-        hazards["Toxicity"] = "Moderate"
-
-    # Environmental hazards: halogens
-    smarts_env = ["F", "Cl", "Br", "I"]
-    if any(mol.HasSubstructMatch(Chem.MolFromSmarts(s)) for s in smarts_env):
-        hazards["EnvironmentalHazard"] = True
-
-    # Tailor advice
-    advice = []
-    if hazards["Flammable"]:
-        advice.append("Keep away from open flame or heat.")
-    if hazards["Toxicity"] in ["Moderate", "High"]:
-        advice.append("Avoid ingestion and skin contact.")
-    if hazards["EnvironmentalHazard"]:
-        advice.append("Prevent environmental release.")
-    if advice:
-        hazards["Advice"] = " ".join(advice)
-
-    return hazards
 
 # ===========================
-# Fallback Estimation
+# Practical hazard estimation
 # ===========================
 
-def estimate_practical_hazards(smiles):
-    """
-    Returns a practical lab-oriented hazard summary.
-    Flammable, Toxicity, Environmental Hazard, and short advice.
-    """
-    from rdkit import Chem
-
+def estimate_practical_hazards(smiles: str, intel: dict = None) -> dict:
+    """Returns practical lab-oriented hazard summary."""
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
-        # If RDKit cannot parse the SMILES, return conservative defaults
         return {
-            "Flammable": False,
+            "Flammable": None,
             "Toxicity": "Unknown",
-            "EnvironmentalHazard": False,
-            "Advice": "SMILES could not be parsed. Exercise general laboratory safety precautions."
+            "EnvironmentalHazard": None,
+            "Advice": "Could not parse SMILES. Exercise general lab safety precautions."
         }
 
     hazards = {
@@ -259,7 +192,7 @@ def estimate_practical_hazards(smiles):
     }
 
     # --- Flammable heuristics ---
-    smarts_flammable = ["[OH]", "[CH3]", "[CH2]"]
+    smarts_flammable = ["[CH3]", "[CH2]", "[OH]", "c", "[O][C]"]
     for s in smarts_flammable:
         query = Chem.MolFromSmarts(s)
         if query and mol.HasSubstructMatch(query):
@@ -274,7 +207,7 @@ def estimate_practical_hazards(smiles):
             hazards["Toxicity"] = "Moderate"
             break
 
-    # --- Environmental hazards (halogens) ---
+    # --- Environmental hazards ---
     smarts_env = ["F", "Cl", "Br", "I"]
     for s in smarts_env:
         query = Chem.MolFromSmarts(s)
@@ -282,16 +215,26 @@ def estimate_practical_hazards(smiles):
             hazards["EnvironmentalHazard"] = True
             break
 
+    # --- Metal compounds or special functional groups ---
+    if intel:
+        if intel.get("HasMetal"):
+            hazards["Toxicity"] = "High"
+            hazards["Advice"] += " Treat as potentially toxic metal compound."
+        if any(atom in intel.get("Atoms", []) for atom in ["O"]):
+            # crude oxidizer detection
+            if ">=O" in smiles or "=O)=O" in smiles:
+                hazards["Advice"] += " Strong oxidizer – avoid contact with organics."
+
     # --- Tailor advice ---
-    advice = []
+    advice_list = []
     if hazards["Flammable"]:
-        advice.append("Keep away from open flame or heat.")
+        advice_list.append("Keep away from open flame or heat.")
     if hazards["Toxicity"] in ["Moderate", "High"]:
-        advice.append("Avoid ingestion and skin contact.")
+        advice_list.append("Avoid ingestion and skin contact.")
     if hazards["EnvironmentalHazard"]:
-        advice.append("Prevent environmental release.")
-    if advice:
-        hazards["Advice"] = " ".join(advice)
+        advice_list.append("Prevent environmental release.")
+
+    if advice_list:
+        hazards["Advice"] = " ".join(advice_list)
 
     return hazards
-
