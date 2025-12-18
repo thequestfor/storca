@@ -1,44 +1,44 @@
-# src/molecule_tools.py
 from pathlib import Path
-from openbabel import openbabel as ob
 from rdkit import Chem
-from rdkit.Chem import Draw
+from rdkit.Chem import AllChem, Draw
 
-def xyz_to_smiles(xyz_file: Path) -> str:
-    """Convert XYZ file to SMILES using Open Babel."""
-    conv = ob.OBConversion()
-    conv.SetInFormat("xyz")
-    conv.SetOutFormat("smi")
-    mol = ob.OBMol()
-    if not conv.ReadFile(mol, str(xyz_file)):
-        raise ValueError(f"Failed to read XYZ file: {xyz_file}")
-    smiles = conv.WriteString(mol).strip().split()[0]
-    return smiles
-
-def smiles_to_xyz(smiles: str, output_file: Path) -> Path:
-    """Generate approximate XYZ from SMILES using Open Babel."""
-    conv = ob.OBConversion()
-    conv.SetInFormat("smi")
-    conv.SetOutFormat("xyz")
-    mol = ob.OBMol()
-    conv.ReadString(mol, smiles)
-    builder = ob.OBBuilder()
-    builder.Build(mol)
-    conv.WriteFile(mol, str(output_file))
-    return output_file
-
-def smiles_to_png(smiles: str, output_file: Path, size=(300, 300)) -> Path:
-    """Generate 2D PNG from SMILES using RDKit."""
+def sanitize_smiles(smiles: str) -> str:
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
-        raise ValueError(f"Invalid SMILES string: {smiles}")
-    Chem.rdDepictor.Compute2DCoords(mol)
-    img = Draw.MolToImage(mol, size=size)
-    img.save(output_file)
-    return output_file
+        raise ValueError(f"Invalid or ambiguous SMILES: {smiles}")
+    return Chem.MolToSmiles(mol, canonical=True)
 
-def xyz_to_png(xyz_file: Path, output_file: Path, size=(300, 300)) -> Path:
-    """Generate 2D PNG from XYZ by converting XYZ → SMILES first."""
-    smiles = xyz_to_smiles(xyz_file)
-    return smiles_to_png(smiles, output_file, size=size)
+def smiles_to_xyz(smiles: str, output_path: Path) -> Path:
+    smiles = sanitize_smiles(smiles)
+    mol = Chem.MolFromSmiles(smiles)
+    mol = Chem.AddHs(mol)
+    AllChem.EmbedMolecule(mol, AllChem.ETKDG())
+    conf = mol.GetConformer()
+    with output_path.open("w") as f:
+        f.write(f"{mol.GetNumAtoms()}\n\n")
+        for atom in mol.GetAtoms():
+            pos = conf.GetAtomPosition(atom.GetIdx())
+            f.write(f"{atom.GetSymbol()} {pos.x:.6f} {pos.y:.6f} {pos.z:.6f}\n")
+    return output_path
 
+def smiles_to_png(smiles: str, output_path: Path) -> Path:
+    smiles = sanitize_smiles(smiles)
+    mol = Chem.MolFromSmiles(smiles)
+    AllChem.Compute2DCoords(mol)
+    img = Draw.MolToImage(mol, size=(300, 300))
+    img.save(output_path)
+    return output_path
+
+def xyz_to_png(xyz_path: Path, output_path: Path) -> Path:
+    with xyz_path.open() as f:
+        lines = f.readlines()[2:]
+    mol = Chem.RWMol()
+    for line in lines:
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        mol.AddAtom(Chem.Atom(parts[0]))
+    AllChem.Compute2DCoords(mol)
+    img = Draw.MolToImage(mol, size=(300, 300))
+    img.save(output_path)
+    return output_path
