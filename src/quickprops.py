@@ -1,8 +1,10 @@
+# src/quickprops.py
 import json
 import os
 import requests
 import pubchempy as pcp
 from openbabel import openbabel as ob
+from . import hazards  # ✅ import the module, access functions via hazards.*
 
 # ============================================================
 # XYZ → SMILES
@@ -20,12 +22,11 @@ def xyz_to_smiles(xyz_file):
     if not conv.ReadFile(mol, xyz_file):
         raise ValueError(f"Failed to read XYZ file: {xyz_file}")
 
-    smiles = conv.WriteString(mol).strip()
+    smiles = conv.WriteString(mol).strip().split()[0]
     if not smiles:
         raise ValueError("Open Babel failed to generate SMILES")
 
     return smiles
-
 
 # ============================================================
 # SMILES → IUPAC (NIH CACTUS fallback)
@@ -40,9 +41,8 @@ def smiles_to_iupac(smiles):
         pass
     return None
 
-
 # ============================================================
-# PUBCHEM PUG-VIEW (SECTION-AWARE EXTRACTION)
+# PUBCHEM PUG-VIEW DESCRIPTION
 # ============================================================
 GOOD_SECTIONS = {
     "description",
@@ -52,7 +52,6 @@ GOOD_SECTIONS = {
     "uses"
 }
 
-
 def extract_pubchem_description(data, max_paragraphs=3):
     collected = []
 
@@ -61,12 +60,11 @@ def extract_pubchem_description(data, max_paragraphs=3):
             heading = node.get("TOCHeading", current_heading)
             heading_norm = heading.lower() if isinstance(heading, str) else None
 
-            if heading_norm in GOOD_SECTIONS:
-                if "StringWithMarkup" in node:
-                    for item in node["StringWithMarkup"]:
-                        text = item.get("String")
-                        if text and len(text.split()) >= 8:
-                            collected.append(text)
+            if heading_norm in GOOD_SECTIONS and "StringWithMarkup" in node:
+                for item in node["StringWithMarkup"]:
+                    text = item.get("String")
+                    if text and len(text.split()) >= 8:
+                        collected.append(text)
 
             for v in node.values():
                 walk(v, heading)
@@ -78,7 +76,6 @@ def extract_pubchem_description(data, max_paragraphs=3):
     walk(data)
     return "\n\n".join(collected[:max_paragraphs]) if collected else None
 
-
 def fetch_pubchem_description(cid):
     url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug_view/data/compound/{cid}/JSON"
     try:
@@ -89,9 +86,8 @@ def fetch_pubchem_description(cid):
     except requests.RequestException:
         return None
 
-
 # ============================================================
-# ChEBI (CURATED DESCRIPTIONS)
+# ChEBI DESCRIPTION
 # ============================================================
 def fetch_chebi_description(inchikey):
     search_url = (
@@ -119,9 +115,8 @@ def fetch_chebi_description(inchikey):
 
     return None
 
-
 # ============================================================
-# Wikipedia Summary
+# Wikipedia SUMMARY
 # ============================================================
 def fetch_wikipedia_summary(name):
     url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{name}"
@@ -136,9 +131,8 @@ def fetch_wikipedia_summary(name):
         pass
     return None
 
-
 # ============================================================
-# Generated Fallback Description
+# Generated fallback description
 # ============================================================
 def generate_description(name, mw, xlogp, tpsa):
     parts = [f"{name} is an organic compound"]
@@ -150,9 +144,8 @@ def generate_description(name, mw, xlogp, tpsa):
         parts.append(f"with a topological polar surface area of {tpsa:.1f} Å²")
     return " ".join(parts) + "."
 
-
 # ============================================================
-# MASTER FUNCTION (API UNCHANGED)
+# MASTER FUNCTION
 # ============================================================
 def analyze_xyz(xyz_path):
     smiles = xyz_to_smiles(xyz_path)
@@ -166,6 +159,27 @@ def analyze_xyz(xyz_path):
     tpsa = compound.tpsa if compound else None
     synonyms = compound.synonyms if compound and compound.synonyms else []
 
+    # ✅ Use hazards module functions
+    ghs = hazards.classify_hazards(
+        cid=cid,
+        smiles=smiles,
+        molecular_weight=mw,
+        xlogp=xlogp
+    )
+
+    practical = hazards.estimate_practical_hazards(smiles)
+
+    hazards_summary = {
+        "Source": ghs.get("Source", "Estimated"),
+        "SignalWord": ghs.get("SignalWord"),
+        "GHS": {
+            "Codes": ghs.get("GHSCodes", []),
+            "Descriptions": ghs.get("HCodeDescriptions", {}),
+            "Pictograms": ghs.get("Pictograms", []),
+        },
+        "Practical": practical,
+    }
+
     iupac = (
         compound.iupac_name
         if compound and compound.iupac_name
@@ -173,22 +187,12 @@ def analyze_xyz(xyz_path):
         or "Unknown compound"
     )
 
-    description = None
-
-    # 1. Wikipedia (best prose)
-    description = fetch_wikipedia_summary(iupac)
-
-    # 2. ChEBI (curated)
-    if not description and compound and compound.inchikey:
-        description = fetch_chebi_description(compound.inchikey)
-
-    # 3. PubChem narrative
-    if not description and cid:
-        description = fetch_pubchem_description(cid)
-
-    # 4. Generated fallback
-    if not description:
-        description = generate_description(iupac, mw, xlogp, tpsa)
+    description = (
+        fetch_wikipedia_summary(iupac)
+        or (compound and fetch_chebi_description(compound.inchikey))
+        or (cid and fetch_pubchem_description(cid))
+        or generate_description(iupac, mw, xlogp, tpsa)
+    )
 
     return {
         "SMILES": smiles,
@@ -199,8 +203,8 @@ def analyze_xyz(xyz_path):
         "XLogP": xlogp,
         "Synonyms": synonyms,
         "Description": description,
+        "Hazards": hazards_summary,
     }
-
 
 # ============================================================
 # CLI TEST
@@ -214,4 +218,3 @@ if __name__ == "__main__":
 
     info = analyze_xyz(sys.argv[1])
     print(json.dumps(info, indent=2))
-
