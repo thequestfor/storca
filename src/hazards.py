@@ -4,8 +4,8 @@ hazards.py
 Hazard classification module.
 
 - Uses PubChem PUG-View GHS data when available.
-- Falls back to estimated practical hazards if PubChem data unavailable.
-- Practical hazards now cover aromatics, ethers, alcohols, aldehydes, halogens, etc.
+- Falls back to structural heuristics if PubChem data unavailable.
+- Maps GHS H-codes to practical hazard flags: Flammable, Toxicity, Corrosive, EnvironmentalHazard, PhysicalHazard.
 """
 
 from __future__ import annotations
@@ -16,6 +16,42 @@ from rdkit import Chem
 
 PUBCHEM_PUGVIEW = "https://pubchem.ncbi.nlm.nih.gov/rest/pug_view/data/compound/{cid}/JSON"
 
+# --- Mapping of H-codes to practical hazard flags ---
+H_TO_PRACTICAL = {
+    # Flammable
+    "H220": "Flammable",
+    "H221": "Flammable",
+    "H222": "Flammable",
+    "H223": "Flammable",
+    "H224": "Flammable",
+    "H225": "Flammable",
+    "H226": "Flammable",
+    "H227": "Flammable",
+
+    # Acute toxicity
+    "H300": "ToxicityHigh",
+    "H301": "ToxicityHigh",
+    "H302": "ToxicityModerate",
+    "H310": "ToxicityHigh",
+    "H311": "ToxicityHigh",
+    "H312": "ToxicityModerate",
+    "H330": "ToxicityHigh",
+    "H331": "ToxicityHigh",
+    "H332": "ToxicityModerate",
+    "H333": "ToxicityModerate",
+
+    # Corrosive / Irritation
+    "H314": "Corrosive",
+    "H315": "Corrosive",
+    "H318": "Corrosive",
+    "H319": "Corrosive",
+
+    # Environmental hazards
+    "H400": "EnvironmentalHazard",
+    "H401": "EnvironmentalHazard",
+    "H410": "EnvironmentalHazard",
+    "H411": "EnvironmentalHazard",
+}
 
 # ===========================
 # Public API
@@ -25,50 +61,69 @@ def classify_hazards(
     *,
     cid: Optional[int],
     smiles: str,
-    molecular_weight: Optional[float],
-    xlogp: Optional[float],
+    molecular_weight: Optional[float] = None,
+    xlogp: Optional[float] = None,
 ) -> Dict:
     """
-    Determine hazard classification for a compound.
-
-    Returns a structured hazard dictionary with:
-      - Source
-      - SignalWord
-      - GHSCodes
-      - HazardStatements
-      - HCodeDescriptions
-      - Pictograms
-      - Flammable/Toxicity/EnvironmentalHazard
-      - Advice
+    Return hazard dictionary with:
+        - GHS H-codes, signal words, pictograms
+        - Practical lab flags: Flammable, Toxicity, Corrosive, EnvironmentalHazard
+        - Tailored Advice
     """
+    # Start with structural heuristics
+    practical = estimate_practical_hazards(smiles)
 
-    # --- Attempt PubChem GHS extraction ---
+    # Attempt PubChem GHS extraction
+    ghs = None
     if cid:
         data = _fetch_pubchem_pugview(cid)
         if data and _has_ghs_section(data):
-            hazards = _extract_pubchem_ghs(data)
-            if hazards:
-                # Merge practical advice instead of overwriting
-                practical = estimate_practical_hazards(smiles)
-                hazards.update({
-                    "Flammable": practical["Flammable"],
-                    "Toxicity": practical["Toxicity"],
-                    "EnvironmentalHazard": practical["EnvironmentalHazard"],
-                    "Advice": practical["Advice"]
-                })
-                return hazards
+            ghs = _extract_pubchem_ghs(data)
 
-    # --- Fallback estimation ---
-    hazards = estimate_practical_hazards(smiles)
-    hazards.update({
-        "Source": "Estimated",
-        "SignalWord": None,
-        "GHSCodes": [],
-        "HCodeDescriptions": {},
-        "Pictograms": []
-    })
-    return hazards
+    # Apply H-code mapping to practical hazards
+    if ghs:
+        for hcode in ghs.get("GHSCodes", []):
+            flag = H_TO_PRACTICAL.get(hcode)
+            if flag == "Flammable":
+                practical["Flammable"] = True
+                practical["PhysicalHazard"] = max_hazard(practical.get("PhysicalHazard"), "High")
+            elif flag == "ToxicityHigh":
+                practical["Toxicity"] = max_toxicity(practical.get("Toxicity"), "High (systemic)")
+            elif flag == "ToxicityModerate":
+                practical["Toxicity"] = max_toxicity(practical.get("Toxicity"), "Moderate (systemic)")
+            elif flag == "Corrosive":
+                practical["PhysicalHazard"] = max_hazard(practical.get("PhysicalHazard"), "High")
+                practical["Advice"] += " Handle with gloves and eye protection."
+            elif flag == "EnvironmentalHazard":
+                practical["EnvironmentalHazard"] = True
 
+        # Merge GHS info with practical flags
+        result = {**ghs, **practical}
+    else:
+        # No PubChem GHS, fallback
+        result = {
+            "Source": "Estimated",
+            "SignalWord": None,
+            "GHSCodes": [],
+            "HCodeDescriptions": {},
+            "Pictograms": [],
+            **practical
+        }
+
+    # Build advice based on updated flags
+    advice = []
+    if result.get("Flammable"):
+        advice.append("Keep away from heat, sparks, and open flame.")
+    if result.get("PhysicalHazard") in ["High", "Extreme"]:
+        advice.append("Use in well-ventilated area with appropriate precautions.")
+    if result.get("EnvironmentalHazard"):
+        advice.append("Prevent environmental release.")
+    if "Corrosive" in H_TO_PRACTICAL.values() and "Handle with gloves" in result.get("Advice", ""):
+        advice.append("Handle with gloves and eye protection.")
+    if advice:
+        result["Advice"] = " ".join(advice)
+
+    return result
 
 # ===========================
 # PubChem PUG-View Parsing
@@ -83,23 +138,17 @@ def _fetch_pubchem_pugview(cid: int) -> Optional[dict]:
         pass
     return None
 
-
 def _has_ghs_section(data: dict) -> bool:
-    found = False
     def walk(node):
-        nonlocal found
         if isinstance(node, dict):
             heading = node.get("TOCHeading", "").lower()
             if "hazard" in heading or "ghs" in heading:
-                found = True
-            for v in node.values():
-                walk(v)
-        elif isinstance(node, list):
-            for item in node:
-                walk(item)
-    walk(data)
-    return found
-
+                return True
+            return any(walk(v) for v in node.values())
+        if isinstance(node, list):
+            return any(walk(i) for i in node)
+        return False
+    return walk(data)
 
 def _extract_pubchem_ghs(data: dict) -> Optional[Dict]:
     hazard_texts: Set[str] = set()
@@ -113,9 +162,9 @@ def _extract_pubchem_ghs(data: dict) -> Optional[Dict]:
 
             if name == "GHS Hazard Statements" and value:
                 for item in value.get("StringWithMarkup", []):
-                    text = item.get("String", "").strip()
-                    if text:
-                        hazard_texts.add(text)
+                    txt = item.get("String", "").strip()
+                    if txt:
+                        hazard_texts.add(txt)
 
             elif name == "Signal" and value:
                 for item in value.get("StringWithMarkup", []):
@@ -140,26 +189,21 @@ def _extract_pubchem_ghs(data: dict) -> Optional[Dict]:
     if not hazard_texts:
         return None
 
-    # Extract H-codes
     h_codes = sorted(set(re.findall(r"H\d{3}", " ".join(hazard_texts))))
-
-    # Map H-codes → full description
     hcode_map = {}
     for text in hazard_texts:
-        match = re.match(r"(H\d{3}):?\s*(.*)", text)
-        if match:
-            h, desc = match.groups()
+        m = re.match(r"(H\d{3}):?\s*(.*)", text)
+        if m:
+            h, desc = m.groups()
             hcode_map[h] = desc
 
     return {
         "Source": "PubChem GHS",
         "SignalWord": _select_signal_word(signal_words),
         "GHSCodes": h_codes,
-        "HazardStatements": sorted(hazard_texts),
         "HCodeDescriptions": hcode_map,
         "Pictograms": sorted(pictograms),
     }
-
 
 def _select_signal_word(words: Set[str]) -> Optional[str]:
     if "Danger" in words:
@@ -168,73 +212,90 @@ def _select_signal_word(words: Set[str]) -> Optional[str]:
         return "Warning"
     return None
 
-
 # ===========================
-# Practical hazard estimation
+# Practical hazard estimation (structural fallback)
 # ===========================
 
 def estimate_practical_hazards(smiles: str, intel: dict = None) -> dict:
-    """Returns practical lab-oriented hazard summary."""
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
         return {
             "Flammable": None,
             "Toxicity": "Unknown",
+            "PhysicalHazard": "Unknown",
             "EnvironmentalHazard": None,
             "Advice": "Could not parse SMILES. Exercise general lab safety precautions."
         }
 
     hazards = {
         "Flammable": False,
-        "Toxicity": "Low",
+        "Toxicity": "Low (systemic)",
+        "PhysicalHazard": "Low",
         "EnvironmentalHazard": False,
         "Advice": "Use standard PPE (gloves, goggles), avoid inhalation."
     }
 
-    # --- Flammable heuristics ---
+    atoms = {a.GetSymbol() for a in mol.GetAtoms()}
+
+    # --- Inorganic flammable gases ---
+    inorganic_flammable = {"H", "Si", "B", "P", "As"}
+    if atoms <= inorganic_flammable:
+        hazards["Flammable"] = True
+        hazards["PhysicalHazard"] = "Extreme"
+
+    # --- Organic flammability heuristics ---
     smarts_flammable = ["[CH3]", "[CH2]", "[OH]", "c", "[O][C]"]
     for s in smarts_flammable:
-        query = Chem.MolFromSmarts(s)
-        if query and mol.HasSubstructMatch(query):
+        q = Chem.MolFromSmarts(s)
+        if q and mol.HasSubstructMatch(q):
             hazards["Flammable"] = True
+            hazards["PhysicalHazard"] = max_hazard(hazards.get("PhysicalHazard"), "High")
             break
 
     # --- Toxicity heuristics ---
     smarts_toxic = ["[N+]", "[C#N]", "N=O"]
     for s in smarts_toxic:
-        query = Chem.MolFromSmarts(s)
-        if query and mol.HasSubstructMatch(query):
-            hazards["Toxicity"] = "Moderate"
+        q = Chem.MolFromSmarts(s)
+        if q and mol.HasSubstructMatch(q):
+            hazards["Toxicity"] = max_toxicity(hazards.get("Toxicity"), "Moderate (systemic)")
             break
 
     # --- Environmental hazards ---
-    smarts_env = ["F", "Cl", "Br", "I"]
-    for s in smarts_env:
-        query = Chem.MolFromSmarts(s)
-        if query and mol.HasSubstructMatch(query):
+    for hal in ["F", "Cl", "Br", "I"]:
+        if any(a.GetSymbol() == hal for a in mol.GetAtoms()):
             hazards["EnvironmentalHazard"] = True
             break
 
-    # --- Metal compounds or special functional groups ---
-    if intel:
-        if intel.get("HasMetal"):
-            hazards["Toxicity"] = "High"
-            hazards["Advice"] += " Treat as potentially toxic metal compound."
-        if any(atom in intel.get("Atoms", []) for atom in ["O"]):
-            # crude oxidizer detection
-            if ">=O" in smiles or "=O)=O" in smiles:
-                hazards["Advice"] += " Strong oxidizer – avoid contact with organics."
-
-    # --- Tailor advice ---
-    advice_list = []
+    # --- Tailored advice ---
+    advice = []
     if hazards["Flammable"]:
-        advice_list.append("Keep away from open flame or heat.")
-    if hazards["Toxicity"] in ["Moderate", "High"]:
-        advice_list.append("Avoid ingestion and skin contact.")
+        advice.append("Keep away from heat, sparks, and open flame.")
+    if hazards["PhysicalHazard"] in ["High", "Extreme"]:
+        advice.append("Use in well-ventilated area with appropriate precautions.")
     if hazards["EnvironmentalHazard"]:
-        advice_list.append("Prevent environmental release.")
+        advice.append("Prevent environmental release.")
 
-    if advice_list:
-        hazards["Advice"] = " ".join(advice_list)
+    if advice:
+        hazards["Advice"] = " ".join(advice)
 
     return hazards
+
+# ===========================
+# Utilities
+# ===========================
+
+def max_hazard(current: str, new: str) -> str:
+    """Return the more severe hazard level."""
+    levels = ["Low", "Moderate", "High", "Extreme"]
+    try:
+        return max([current, new], key=lambda x: levels.index(x))
+    except ValueError:
+        return new
+
+def max_toxicity(current: str, new: str) -> str:
+    """Return the more severe toxicity level."""
+    levels = ["Low (systemic)", "Moderate (systemic)", "High (systemic)"]
+    try:
+        return max([current, new], key=lambda x: levels.index(x))
+    except ValueError:
+        return new

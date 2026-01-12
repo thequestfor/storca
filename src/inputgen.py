@@ -1,43 +1,46 @@
 # src/inputgen.py
 from pathlib import Path
-from rdkit import Chem
 
+def create_orca_input(
+    xyz_file: Path,
+    charge: int,
+    multiplicity: int,
+    opt: bool = False,
+    freq: bool = False,
+    label: str = "job",
+    ncores: int = 1  # NEW: number of CPU cores
+) -> Path:
+    inp_file = Path(f"{label}.inp")
+    lines = []
 
-def create_orca_input(xyz_file: Path, charge=0, multiplicity=1, opt=True, label: str = "", intel: dict = None):
-    """
-    Smarter ORCA input generator using structure intelligence.
-    intel: optional dict containing info from analyze_molecule (e.g., HasMetal, NumAtoms).
-    """
+    # Method and basis
+    keywords = ["B3LYP", "def2-SVP"]
+    if opt:
+        keywords.append("Opt")
+    if freq:
+        keywords.append("Freq")
+    lines.append("! " + " ".join(keywords))
 
-    # Default method
-    method_line = "! B3LYP def2-SVP"
+    # PAL block for parallel execution
+    lines.append(f"%pal\n  nprocs {ncores}\nend")
 
-    # Adjust for molecule size or metals
-    if intel:
-        num_atoms = intel.get("NumAtoms", 0)
-        has_metal = intel.get("HasMetal", False)
+    # Coordinates
+    lines.append(f"* xyz {charge} {multiplicity}")
 
-        if has_metal:
-            method_line = "! B3LYP def2-TZVP ECP"
-        elif num_atoms > 50:
-            method_line = "! RI-B3LYP def2-SVP TightSCF"
+    with open(xyz_file) as f:
+        xyz_lines = f.readlines()
+        # Skip first two lines ONLY if they are atom count + comment
+        try:
+            int(xyz_lines[0].strip())
+            start_idx = 2
+        except (ValueError, IndexError):
+            start_idx = 0
+        lines.extend([line.strip() for line in xyz_lines[start_idx:] if line.strip()])
 
-    # Optimization flag
-    method_line += " Opt TightSCF" if opt else " TightSCF"
+    lines.append("*")
 
-    # Build input content
-    inp_content = f"""{method_line}
-
-* xyzfile {charge} {multiplicity} {xyz_file}
-"""
-
-    # Build filename with label
-    if label:
-        new_name = f"{xyz_file.stem}_{label}.inp"
-    else:
-        new_name = f"{xyz_file.stem}.inp"
-
-    inp_file = xyz_file.with_name(new_name)
-    inp_file.write_text(inp_content)
+    with open(inp_file, "w") as f:
+        f.write("\n".join(lines))
 
     return inp_file
+
