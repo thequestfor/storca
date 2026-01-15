@@ -36,6 +36,8 @@ With this workflow, users can:
 ## Usage Notes
 
 - Ensure ORCA is installed and accessible from your system PATH
+- Run "python typerint.py"
+- Usage options will be shown
 - You can provide either:
   - A `.xyz` coordinate file, or
   - A SMILES string (the program will generate the XYZ file automatically)
