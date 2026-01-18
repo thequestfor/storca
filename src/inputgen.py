@@ -7,6 +7,7 @@ def create_orca_input(
     multiplicity: int,
     opt: bool = False,
     freq: bool = False,
+    keepdens: bool = False,
     label: str = "job",
     ncores: int = 1  # NEW: number of CPU cores
 ) -> Path:
@@ -19,6 +20,8 @@ def create_orca_input(
         keywords.append("Opt")
     if freq:
         keywords.append("Freq")
+    if keepdens:
+        keywords.append("KeepDens")
     lines.append("! " + " ".join(keywords))
 
     # PAL block for parallel execution

@@ -146,7 +146,7 @@ def run_orca_workflow(xyz_file: Path, base_name: str, intel: dict = None, ncores
         multiplicity = 1 if charge == charge0 else 2
         label = f"sp{charge - charge0:+}"
         sp_inp = create_orca_input(
-            optimized_xyz, charge=charge, multiplicity=multiplicity, opt=False, label=label, ncores=ncores
+            optimized_xyz, charge=charge, multiplicity=multiplicity, opt=False, keepdens=True, label=label, ncores=ncores
         )
         typer.echo(f"\nRunning single-point calculation for charge {charge} (multiplicity {multiplicity}): {sp_inp}")
         sp_outputs = run_orca(sp_inp)
