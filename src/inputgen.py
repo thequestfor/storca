@@ -15,7 +15,7 @@ def create_orca_input(
     lines = []
 
     # Method and basis
-    keywords = ["B3LYP", "def2-SVP"]
+    keywords = ["B3LYP", "def2-SVP", "NoAutoStart"]
     if opt:
         keywords.append("Opt")
     if freq:
