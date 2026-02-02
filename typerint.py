@@ -4,22 +4,35 @@ import typer
 from rich.prompt import Prompt
 from typing import Optional
 import subprocess
-
+import time
+import threading
+import numpy as np
 from src.inputgen import create_orca_input
 from src.orca_runner import run_orca
-from src.parser import parse_orca_orbitals
+from src.parser import (
+    parse_orca_orbitals,
+    parse_orca_energy,
+    parse_orca_ir,
+    parse_goat_out,
+    parse_xyz_ensemble,
+    attach_xyz_to_conformers
+)
 from src.converter import gbw_to_wfn
 from src.wfngrid import run_multiwfn_fukui
 from src.quickprops import analyze_molecule
 from src.molecule_tools import (
+    write_weighted_orca_freq,
     smiles_to_xyz,
     smiles_to_png,
+    generate_unique_conformers,
+    smiles_to_conformers,
     xyz_to_png,
     sanitize_smiles,
 )
+from src.plotter import build_ir_spectrum
 from src.stability.freq_check import frequency_stability_check
 from src.utils.orca_xyz_clean import clean_xyz_for_orca
-
+import csv 
 app = typer.Typer(
     help="Automated ORCA + Multiwfn workflow with quick property and hazard estimates"
 )
@@ -181,6 +194,415 @@ def run_orca_workflow(xyz_file: Path, base_name: str, intel: dict = None, ncores
     typer.echo("\nAll ORCA + Multiwfn steps completed successfully.")
 
 
+# -------------------------------
+# Frequency compression function
+# -------------------------------
+def compress_wavenumber(freq_raw):
+    """
+    Smoothly compress harmonic frequencies to experimental scale.
+    
+    Parameters
+    ----------
+    freq_raw : float or ndarray
+        Harmonic frequency in cm^-1
+
+    Returns
+    -------
+    freq_scaled : float or ndarray
+        Compressed frequency
+    """
+    f0 = 2000.0     # midpoint of compression (cm^-1)
+    delta = 1200.0  # controls how sharply compression ramps
+    min_scale = 0.9  # scale for very high freq
+    max_scale = 0.995  # scale for low freq
+    
+    scale = min_scale + (max_scale - min_scale) / (1 + np.exp((freq_raw - f0)/delta))
+    
+    return freq_raw * scale
+
+def run_conformers(
+    xyz_initial: str = typer.Option(..., help="filename of XYZ geometry of molecule"),
+    out_dir: Path = typer.Option(Path("conformers"), help="Output directory"),
+    ncores: int = typer.Option(1, help="Number of CPU cores for ORCA"),
+    temperature: float = typer.Option(298.15, help="Temperature for Boltzmann weighting in K")
+):
+    """
+    Run GOAT conformer search, optimize significant conformers, and compute Boltzmann weights.
+    """
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if hasattr(temperature, "default"):
+        temperature = float(temperature.default)
+
+    typer.echo("\nGenerating input file for conformer search (GOAT)...")
+    inp_file = create_orca_input(
+        xyz_file=xyz_initial,
+        charge=0,
+        multiplicity=1,
+        use_goat=True,
+        label=out_dir / "goat",
+        ncores=ncores
+    )
+    typer.echo(f"   Input file generated at {inp_file}")
+    typer.echo("\nLaunching conformer search...\n")
+
+    # -------------------------------
+    # Helper: run ORCA/GOAT with monitoring
+    # -------------------------------
+    def run_goat_with_monitor(inp_file: Path, out_dir: Path, stall_threshold: int = 60):
+        goat_out = inp_file.with_suffix(".out")
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        def run_orca_thread():
+            try:
+                run_orca(inp_file, capture_out=True, stdout_file=goat_out)
+            except Exception as e:
+                run_orca_thread.error = e
+
+        run_orca_thread.error = None
+        t = threading.Thread(target=run_orca_thread)
+        t.start()
+
+        stalled_count = 0
+        last_sizes = {f: f.stat().st_size for f in out_dir.glob("*") if f.is_file()}
+
+        while t.is_alive():
+            total_size = 0
+            changed = False
+
+            for f in out_dir.glob("*"):
+                if not f.is_file():
+                    continue
+                try:
+                    size = f.stat().st_size
+                except FileNotFoundError:
+                    continue
+
+                total_size += size
+                if f not in last_sizes or size != last_sizes[f]:
+                    last_sizes[f] = size
+                    changed = True
+
+            if changed:
+                stalled_count = 0
+            else:
+                stalled_count += 1
+
+            status = f"GOAT running... thread alive, total output size: {total_size} bytes"
+            if stalled_count > 0:
+                status += f" | {stalled_count}s since last change"
+            typer.echo(f"\r{status}", nl=False)
+
+            if stalled_count >= stall_threshold:
+                typer.echo(f"\n⚠ No file changes for {stall_threshold}s, computation may be slow or frozen.")
+
+            time.sleep(1)
+
+        t.join()
+        typer.echo("\nGOAT run finished.")
+
+        if run_orca_thread.error is not None:
+            typer.echo(f"⚠ ORCA crashed with error: {run_orca_thread.error}")
+            typer.echo("Check goat.out for details. Consider lowering the number of cores.")
+            return False
+
+        if not goat_out.exists() or goat_out.stat().st_size == 0:
+            typer.echo("⚠ ORCA finished but goat.out is missing or empty. Check input and environment.")
+            return False
+
+        typer.echo(f"Output directory: {out_dir}")
+        typer.echo(f"Main output file: {goat_out}")
+
+        xyz_file = inp_file.with_name("goat.finalensemble.xyz")
+        if xyz_file.exists():
+            typer.echo(f"XYZ file: {xyz_file}")
+        else:
+            typer.echo("Warning: XYZ file not found!")
+
+        return True
+
+    # -------------------------------
+    # Run GOAT
+    # -------------------------------
+    success = run_goat_with_monitor(inp_file, out_dir, stall_threshold=60)
+    if not success:
+        return
+
+    # -------------------------------
+    # Parse GOAT output
+    # -------------------------------
+    goat_out = inp_file.with_suffix(".out")
+    conformers, sig_conformers = parse_goat_out(goat_out)
+    typer.echo(f"\nTotal conformers found: {len(conformers)}")
+    typer.echo(f"Significant conformers (>0.05 weight): {len(sig_conformers)}")
+
+    # -------------------------------
+    # Parse XYZ ensemble
+    # -------------------------------
+    xyz_file = inp_file.with_name("goat.finalensemble.xyz")
+    typer.echo(f"Parsing XYZ ensemble: {xyz_file}")
+    xyz_frames = parse_xyz_ensemble(xyz_file)
+    typer.echo(f"XYZ frames found: {len(xyz_frames)}")
+
+    # -------------------------------
+    # Attach XYZ frames to conformers
+    # -------------------------------
+    conformers = attach_xyz_to_conformers(conformers, xyz_frames)
+    typer.echo("Conformers successfully matched with XYZ frames.")
+
+    # -------------------------------
+    # Optimize significant conformers using run_orca
+    # -------------------------------
+    kB_Hartree_per_K = 3.1668114e-6
+    opt_dir = out_dir / "optimization"
+    opt_dir.mkdir(exist_ok=True)
+
+    for c in sig_conformers:
+        idx = c["idx"]
+        typer.echo(f"\nOptimizing conformer {idx}...")
+
+        xyz_path = opt_dir / f"conformer_{idx}.xyz"
+        xyz_lines = c["xyz"]["xyz_lines"]  # Get the list of atom lines.
+        xyz_content = "\n".join(xyz_lines) + "\n"  # Join lines into a single string
+        with open(xyz_path, "w") as f:
+            f.write(xyz_content)
+
+
+        orca_inp = create_orca_input(
+            xyz_file=xyz_path,
+            charge=0,
+            multiplicity=1,
+            label=opt_dir / f"conformer_{idx}",
+            ncores=ncores
+        )
+
+        orca_out = run_orca(orca_inp, capture_out=True)["out"]
+
+        # Parse energy
+        energy = None
+        with open(orca_out) as f:
+            for line in f:
+                if "FINAL SINGLE POINT ENERGY" in line:
+                    energy = float(line.split()[-1])
+        if energy is None:
+            typer.echo(f"⚠ Could not find energy for conformer {idx}, skipping...")
+            continue
+
+        c["energy"] = energy
+        typer.echo(f"Conformer {idx} optimized: Energy = {energy:.6f} Hartree")
+    # -------------------------------
+    # Boltzmann weights (after ALL optimizations)
+    # -------------------------------
+    kB_Hartree_per_K = 3.1668114e-6
+    
+    energies = np.array([c["energy"] for c in sig_conformers])
+    E_min = energies.min()
+    delta_E = energies - E_min
+    
+    boltz_factors = np.exp(-delta_E / (kB_Hartree_per_K * temperature))
+    weights = boltz_factors / boltz_factors.sum()
+    
+    for c, w in zip(sig_conformers, weights):
+        c["weight"] = w
+        typer.echo(
+            f"Conformer {c['idx']}: Energy = {c['energy']:.6f} Hartree, Weight = {w:.4f}"
+        )
+
+    # -------------------------------
+    # Save CSV summary
+    # -------------------------------
+    summary_file = opt_dir / "conformer_summary.csv"
+    with open(summary_file, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["idx", "energy", "weight"])
+        writer.writeheader()
+        for c in sig_conformers:
+            writer.writerow({
+                "idx": c["idx"],
+                "energy": c["energy"],
+                "weight": c["weight"]
+            })
+    
+    typer.echo(f"Summary saved to {summary_file}")
+    
+    # -------------------------------
+    # Frequency calculations
+    # -------------------------------
+    freq_dir = opt_dir / "frequencies"
+    freq_dir.mkdir(exist_ok=True)
+    
+    for c in sig_conformers:
+        idx = c["idx"]
+        typer.echo(f"\nRunning frequency calculation for conformer {idx}...")
+    
+        # ---- Write XYZ ----
+        xyz_path = freq_dir / f"conformer_{idx}.xyz"
+        xyz_lines = c["xyz"]["xyz_lines"]
+        xyz_content = "\n".join(xyz_lines) + "\n"
+    
+        with open(xyz_path, "w") as f:
+            f.write(xyz_content)
+    
+        # ---- ORCA frequency input ----
+        freq_inp = create_orca_input(
+            xyz_file=xyz_path,
+            charge=0,
+            multiplicity=1,
+            label=freq_dir / f"conformer_{idx}_freq",
+            ncores=ncores,
+            freq=True
+        )
+    
+        freq_out = freq_inp.with_suffix(".out")
+    
+        # ---- Run ORCA ----
+        try:
+            run_orca(freq_inp, capture_out=True, stdout_file=freq_out)
+        except Exception as e:
+            typer.echo(f"⚠ Frequency calculation failed for conformer {idx}: {e}")
+            c["freq_failed"] = True
+            continue
+    
+        if not freq_out.exists() or freq_out.stat().st_size == 0:
+            typer.echo(f"⚠ Frequency output missing for conformer {idx}")
+            c["freq_failed"] = True
+            continue
+    
+        typer.echo(f"   Frequency calculation finished for conformer {idx}")
+    
+        # Mark success (parsing comes later)
+        c["freq_out"] = freq_out
+        c["freq_failed"] = False
+    # -------------------------------
+    # Parse IR frequencies
+    # -------------------------------
+    for c in sig_conformers:
+        if c.get("freq_failed", False):
+            continue
+    
+        freq_out = c.get("freq_out")
+        if freq_out is None:
+            continue
+    
+        typer.echo(f"Parsing IR data for conformer {c['idx']}...")
+    
+        vibrations = parse_orca_ir(freq_out)  # returns list of dicts
+    
+        # Extract separate lists
+        freqs = [v["freq"] for v in vibrations]
+        intensities = [v["intensity"] for v in vibrations]
+    
+        c["ir_freqs"] = freqs
+        c["ir_intensities"] = intensities
+    
+    # -------------------------------
+    # Build Boltzmann-weighted IR spectrum in transmittance
+    # -------------------------------
+    
+    typer.echo("\nBuilding Boltzmann-weighted IR spectrum in transmittance...")
+    
+    # -------------------------------
+    # Frequency grid
+    # -------------------------------
+    freq_min, freq_max = 400, 3800  # cm^-1
+    resolution = 1.0
+    fwhm = 25.0  # cm^-1
+    freq_grid = np.arange(freq_min, freq_max + resolution, resolution)
+    
+    # Accumulate molar absorptivity (L mol^-1 cm^-1)
+    spectrum_eps = np.zeros_like(freq_grid, dtype=float)
+    
+    # -------------------------------
+    # Renormalize Boltzmann weights
+    # -------------------------------
+    W = sum(
+        c["weight"] for c in sig_conformers
+        if not c.get("freq_failed", False)
+    )
+    for c in sig_conformers:
+        if not c.get("freq_failed", False):
+            c["weight"] /= W
+    
+    # -------------------------------
+    # Loop over conformers
+    # -------------------------------
+    sigma = fwhm / 2.35482  # Gaussian sigma (cm^-1)
+    norm = sigma * np.sqrt(2.0 * np.pi)
+    
+    for c in sig_conformers:
+        if c.get("freq_failed", False):
+            continue
+    
+        vibrations = parse_orca_ir(c["freq_out"])  # dicts: freq, eps, intensity
+        weight = c["weight"]
+    
+        for v in vibrations:
+            # Compressed fundamental frequency
+            freq = compress_wavenumber(v["freq"])
+    
+            # Boltzmann-weighted molar absorptivity
+            eps = v["eps"] * weight
+    
+            # Normalized Gaussian broadening
+            gauss = np.exp(-(freq_grid - freq) ** 2 / (2.0 * sigma ** 2)) / norm
+            spectrum_eps += eps * gauss
+    
+            # ---- Optional first overtone for strong C–H stretches ----
+            if v["freq"] > 2800.0 and v["eps"] > 5.0:
+                overtone_freq = compress_wavenumber(2.0 * v["freq"])
+                overtone_eps = 0.03 * eps
+                gauss_ot = np.exp(-(freq_grid - overtone_freq) ** 2 / (2.0 * sigma ** 2)) / norm
+                spectrum_eps += overtone_eps * gauss_ot
+    
+    # -------------------------------
+    # Experimental absorbance mapping
+    # -------------------------------
+    
+    # Global absorbance scaling (effective path length × concentration)
+    # Neat liquids typically require much larger values than solutions
+    ABS_SCALE = 2000.0   # reasonable starting point for neat liquid IR
+    
+    absorbance_raw = ABS_SCALE * spectrum_eps
+    
+    # Detector saturation / finite dynamic range
+    A_max = 3.0  # ~0.1% transmittance floor
+    absorbance = A_max * (1.0 - np.exp(-absorbance_raw / A_max))
+    
+    # Convert to transmittance
+    transmittance = 10.0 ** (-absorbance)
+    
+    # -------------------------------
+    # Save CSV
+    # -------------------------------
+    csv_path = out_dir / "ir_spectrum_transmittance.csv"
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Wavenumber_cm-1", "Transmittance"])
+        for x, y in zip(freq_grid, transmittance):
+            writer.writerow([x, y])
+    
+    typer.echo(f"IR transmittance spectrum saved to {csv_path}")
+    
+    # -------------------------------
+    # Plot
+    # -------------------------------
+    import matplotlib.pyplot as plt
+    
+    plt.figure(figsize=(8, 4))
+    plt.plot(freq_grid, transmittance, color="black", linewidth=1.2)
+    plt.gca().invert_xaxis()
+    plt.ylim(0.0, 1.02)
+    plt.xlabel("Wavenumber (cm$^{-1}$)")
+    plt.ylabel("Transmittance")
+    plt.title("Boltzmann-weighted IR Spectrum (Neat Liquid, Compressed)")
+    plt.tight_layout()
+    
+    png_path = out_dir / "ir_spectrum_transmittance.png"
+    plt.savefig(png_path, dpi=300)
+    plt.close()
+    
+    typer.echo(f"IR spectrum plot saved to {png_path}")
+
+
 @app.command()
 def run(
     xyz_file: Optional[Path] = typer.Argument(None, help="Input XYZ file (if using SMILES, omit this)"),
@@ -229,7 +651,7 @@ def run(
         raise FileNotFoundError(f"XYZ file not found: {xyz_file}")
 
     while True:
-        choice = Prompt.ask("\nSelect a section to view", choices=["descriptors", "pubchem", "ORCA", "exit"])
+        choice = Prompt.ask("\nSelect a section to view", choices=["descriptors", "pubchem", "ORCA", "spec", "exit"])
         if choice == "descriptors":
             if info:
                 display_descriptors(info)
@@ -246,6 +668,16 @@ def run(
                 run_orca_workflow(xyz_file, base_name, intel=intel, ncores=cores)
             else:
                 typer.echo("No valid XYZ structure available for ORCA.")
+        elif choice == "spec":
+            if smiles_value:
+                run_conformers(
+                    xyz_initial=xyz_file,
+                    out_dir=Path("conformers"),
+                    ncores=cores
+                )
+            else:
+                typer.echo("Conformer generation currently only supported from SMILES input.")
+        
         elif choice == "exit":
             typer.echo("Exiting.")
             break

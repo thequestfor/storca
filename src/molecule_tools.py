@@ -1,7 +1,8 @@
 from pathlib import Path
 from rdkit import Chem
 from rdkit.Chem import AllChem, Draw
-
+from typing import List
+import numpy as np
 def sanitize_smiles(smiles: str) -> str:
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
@@ -55,6 +56,321 @@ def smiles_to_xyz(smiles: str, xyz_path: Path, n_confs: int = 10) -> Path:
     xyz_path.write_text("\n".join(lines) + "\n")
     return xyz_path
 
+
+
+def generate_unique_conformers(
+    smiles: str,
+    out_dir: Path,
+    n_confs: int = 200,
+    n_top: int = 10,
+    rmsd_threshold: float = 1
+) -> list[Path]:
+    """
+    Generate many conformers, relax them with UFF, remove duplicates,
+    and return top n_top lowest-energy conformers.
+    """
+    from rdkit import Chem
+    from rdkit.Chem import AllChem
+    import numpy as np
+    import typer
+
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        raise ValueError("Invalid SMILES string")
+    mol = Chem.AddHs(mol)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1️⃣ Generate initial conformers
+    conf_ids = list(
+        AllChem.EmbedMultipleConfs(
+            mol,
+            numConfs=n_confs,
+            randomSeed=42
+        )
+    )
+    if not conf_ids:
+        raise RuntimeError("Failed to generate conformers")
+
+    typer.echo(f"\n🔬 Generated {len(conf_ids)} initial conformers")
+    typer.echo("🔧 Optimizing conformers with UFF:")
+
+    # 2️⃣ Optimize each conformer and record energies
+    energies = []
+    total = len(conf_ids)
+
+    for i, cid in enumerate(conf_ids, start=1):
+        typer.echo(f"\r   Optimizing conformer {i}/{total}", nl=False)
+        try:
+            AllChem.UFFOptimizeMolecule(mol, confId=cid)
+            ff = AllChem.UFFGetMoleculeForceField(mol, confId=cid)
+            energies.append(ff.CalcEnergy())
+        except Exception:
+            energies.append(float("inf"))
+
+    typer.echo("")  # newline after progress
+
+    # 3️⃣ RMSD filtering to remove duplicates
+    typer.echo("🔎 Removing duplicate conformers (RMSD filtering)")
+
+    unique_conf_ids: list[int] = []
+    unique_energies: list[float] = []
+
+    for cid, energy in zip(conf_ids, energies):
+        conf = mol.GetConformer(cid)
+        pos = np.array([
+            conf.GetAtomPosition(i)
+            for i in range(mol.GetNumAtoms())
+        ])
+
+        is_duplicate = False
+        for u_cid in unique_conf_ids:
+            u_conf = mol.GetConformer(u_cid)
+            u_pos = np.array([
+                u_conf.GetAtomPosition(i)
+                for i in range(mol.GetNumAtoms())
+            ])
+            rmsd = np.sqrt(np.mean(np.sum((pos - u_pos) ** 2, axis=1)))
+            if rmsd < rmsd_threshold:
+                is_duplicate = True
+                break
+
+        if not is_duplicate:
+            unique_conf_ids.append(cid)
+            unique_energies.append(energy)
+
+    typer.echo(
+        f"   → {len(unique_conf_ids)} unique conformers after RMSD filtering"
+    )
+
+    # 4️⃣ Sort unique conformers by energy
+    sorted_indices = np.argsort(unique_energies)
+    selected_indices = sorted_indices[:n_top]
+
+    selected_conf_ids = [unique_conf_ids[i] for i in selected_indices]
+    selected_energies = [unique_energies[i] for i in selected_indices]
+
+    # 5️⃣ Write XYZ files
+    typer.echo(f"💾 Writing {len(selected_conf_ids)} lowest-energy conformers")
+
+    xyz_paths: list[Path] = []
+    for i, (cid, energy) in enumerate(
+        zip(selected_conf_ids, selected_energies),
+        start=1
+    ):
+        conf = mol.GetConformer(cid)
+        xyz_file = out_dir / f"conf_{i:03d}.xyz"
+
+        lines = [
+            str(mol.GetNumAtoms()),
+            f"UFF Energy: {energy:.6f}"
+        ]
+        for atom in mol.GetAtoms():
+            pos = conf.GetAtomPosition(atom.GetIdx())
+            lines.append(
+                f"{atom.GetSymbol()} {pos.x:.5f} {pos.y:.5f} {pos.z:.5f}"
+            )
+
+        xyz_file.write_text("\n".join(lines) + "\n")
+        xyz_paths.append(xyz_file)
+
+    return xyz_paths
+
+
+
+def compute_boltzmann_weights(conformers: list[dict], temperature: float = 298.15):
+    """
+    Compute Boltzmann weights from ORCA energies and assign to conformers.
+    """
+    R = 0.0019872041  # kcal/mol·K
+    energies_kcal = [float(c["energy"]) for c in conformers if c["energy"] is not None]
+    if not energies_kcal:
+        raise RuntimeError("No conformer energies available.")
+    E_min = min(energies_kcal)
+    weights = [math.exp(-(E - E_min) / (R * temperature)) for E in energies_kcal]
+    Z = sum(weights)
+    for conf, w in zip([c for c in conformers if c["energy"] is not None], weights):
+        conf["weight"] = w / Z
+
+
+def build_weighted_ir(conformers: list[dict]) -> dict:
+    """
+    Compute weighted IR spectrum from conformer frequencies and intensities.
+    Returns a dictionary: {frequency_cm^-1: intensity}
+    """
+    weighted_ir = {}
+    for conf in conformers:
+        if conf.get("freqs") is None or conf.get("ir_intensities") is None or conf.get("weight") is None:
+            continue
+        for f, I in zip(conf["freqs"], conf["ir_intensities"]):
+            weighted_ir[f] = weighted_ir.get(f, 0.0) + I * conf["weight"]
+    return weighted_ir
+
+
+def write_weighted_orca_freq(
+    conformers: list[dict],
+    temperature: float,
+    output_file: Path
+):
+    """
+    Produce a MOLDEN output file readable by Avogadro.
+    Uses the geometry of the lowest-energy conformer and weights IR intensities
+    across all conformers according to Boltzmann factors.
+
+    Args:
+        conformers: list of dicts with keys 'energy', 'freqs', 'ir_intensities'
+        temperature: Boltzmann temperature in K
+        output_file: Path to write the freq.out-style file
+    """
+    import math
+
+    # Boltzmann constant in kcal/mol·K
+    R = 0.0019872041
+    output_file = Path(output_file)
+    # Filter conformers with valid energies and frequencies
+    valid_confs = [c for c in conformers if c["energy"] is not None and c["freqs"] and c["ir_intensities"]]
+
+    if not valid_confs:
+        raise RuntimeError("No valid conformers with frequencies and energies.")
+
+    # Compute Boltzmann weights
+    energies = [c["energy"] * 627.5095 for c in valid_confs]  # Eh -> kcal/mol
+    E_min = min(energies)
+    weights = [math.exp(-(E - E_min) / (R * temperature)) for E in energies]
+    Z = sum(weights)
+    norm_weights = [w / Z for w in weights]
+
+    # Weighted IR intensities
+    weighted_ir = {}
+    for conf, w in zip(valid_confs, norm_weights):
+        for f, I in zip(conf["freqs"], conf["ir_intensities"]):
+            weighted_ir[f] = weighted_ir.get(f, 0.0) + I * w  # I in km/mol
+
+    # Sort frequencies
+    sorted_freqs = sorted(weighted_ir.items())
+
+    # Geometry of lowest-energy conformer
+    lowest_conf = valid_confs[energies.index(E_min)]
+    geom_lines = []
+    if "opt_xyz" in lowest_conf and lowest_conf["opt_xyz"] is not None:
+        xyz_path = lowest_conf["opt_xyz"]
+        lines = xyz_path.read_text().splitlines()
+        n_atoms = int(lines[0])
+        geom_lines = lines[2: 2 + n_atoms]  # skip num atoms + comment line
+    else:
+        raise RuntimeError("Lowest-energy conformer has no geometry (opt_xyz).")
+
+    # Write Molden-style file
+    with output_file.open("w") as f:
+        f.write("[Molden Format]\n")
+        f.write("[FREQ]\n")
+        for freq, intensity in sorted_freqs:
+            f.write(f"{freq:.2f} {intensity:.6f}\n")
+    
+        f.write("[FR-COORD]\n")
+        for line in geom_lines:
+            parts = line.split()
+            symbol = parts[0]  # assumes xyz already has element symbols
+            coords = parts[1:4]
+            f.write(f"{symbol} {coords[0]} {coords[1]} {coords[2]}\n")
+
+
+
+def smiles_to_conformers(
+    smiles: str,
+    out_dir: Path,
+    n_confs: int = 50,
+    rmsd_cutoff: float = 0.5,
+    max_confs: int = 20,
+    random_seed: int = 42,
+) -> List[Path]:
+    """
+    Generate multiple unique low-energy conformers from a SMILES string.
+    Conformers are generated with ETKDG, optimized with UFF, pruned by RMSD,
+    and written as individual XYZ files.
+
+    Args:
+        smiles: input SMILES string
+        out_dir: directory to write conformer XYZ files
+        n_confs: number of initial conformers to generate
+        rmsd_cutoff: RMSD threshold (Å) for pruning similar conformers
+        max_confs: maximum number of conformers to keep
+        random_seed: random seed for reproducibility
+
+    Returns:
+        List of Paths to conformer XYZ files
+    """
+    smiles = sanitize_smiles(smiles)
+
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        raise ValueError(f"Invalid SMILES: {smiles}")
+
+    mol = Chem.AddHs(mol)
+
+    # --- Conformer generation (ETKDG) ---
+    params = AllChem.ETKDGv3()
+    params.randomSeed = random_seed
+    conf_ids = AllChem.EmbedMultipleConfs(
+        mol, numConfs=n_confs, params=params
+    )
+
+    if not conf_ids:
+        raise RuntimeError("Failed to generate conformers")
+
+    # --- MM optimization + energy evaluation ---
+    energies = {}
+    for cid in conf_ids:
+        try:
+            AllChem.UFFOptimizeMolecule(mol, confId=cid)
+            ff = AllChem.UFFGetMoleculeForceField(mol, confId=cid)
+            energies[cid] = ff.CalcEnergy()
+        except Exception:
+            energies[cid] = float("inf")
+
+    # --- Sort conformers by energy ---
+    sorted_cids = sorted(energies, key=energies.get)
+
+    # --- RMSD pruning ---
+    kept_cids = []
+    for cid in sorted_cids:
+        if len(kept_cids) >= max_confs:
+            break
+
+        if not kept_cids:
+            kept_cids.append(cid)
+            continue
+
+        if all(
+            AllChem.GetConformerRMS(mol, cid, kept) > rmsd_cutoff
+            for kept in kept_cids
+        ):
+            kept_cids.append(cid)
+
+    # --- Write XYZ files ---
+    out_dir.mkdir(parents=True, exist_ok=True)
+    xyz_paths: List[Path] = []
+
+    for i, cid in enumerate(kept_cids, start=1):
+        conf = mol.GetConformer(cid)
+        xyz_path = out_dir / f"conf_{i:03d}.xyz"
+
+        lines = [
+            str(mol.GetNumAtoms()),
+            f"Generated by RDKit (UFF energy = {energies[cid]:.4f})",
+        ]
+
+        for atom in mol.GetAtoms():
+            pos = conf.GetAtomPosition(atom.GetIdx())
+            lines.append(
+                f"{atom.GetSymbol()} "
+                f"{pos.x:.6f} {pos.y:.6f} {pos.z:.6f}"
+            )
+
+        xyz_path.write_text("\n".join(lines) + "\n")
+        xyz_paths.append(xyz_path)
+
+    return xyz_paths
 
 def smiles_to_png(smiles: str, output_path: Path) -> Path:
     smiles = sanitize_smiles(smiles)
