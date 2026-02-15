@@ -281,3 +281,55 @@ def parse_orca_ir(file_path: str):
     return vibrations
 
 
+def parse_chemkin_annotated(chemkin_file: Path, barrier_threshold: float = 50.0) -> dict:
+    """
+    Determine kinetic stability from chem_annotated.inp.
+    
+    A species is considered unstable if it appears as a reactant
+    in any decomposition reaction with barrier below the threshold.
+    The species under investigation is always 'stability'.
+    """
+    label = "stability"
+    text = chemkin_file.read_text()
+
+    decomposition_reactions = []
+    reaction_barriers = []
+
+    reactions_section = re.search(r"REACTIONS.*?END", text, re.DOTALL | re.IGNORECASE)
+    if not reactions_section:
+        return {"stable": True, "decomposition_reactions": [], "reaction_barriers": []}
+
+    for line in reactions_section.group(0).splitlines():
+        line = line.strip()
+        if not line or line.startswith("!") or "<=>" not in line:
+            continue
+
+        try:
+            reaction_part, *rest = line.split()
+            Ea = float(rest[-1])
+        except Exception:
+            continue
+
+        lhs, rhs = reaction_part.split("<=>")
+        lhs_species = [re.sub(r"\(\d+\)", "", s.strip()) for s in lhs.split("+")]
+        rhs_species = [re.sub(r"\(\d+\)", "", s.strip()) for s in rhs.split("+")]
+
+        # Only count as decomposition if label is on LHS
+        if label not in lhs_species:
+            continue
+
+        # Ignore trivial identity reactions
+        if rhs_species == [label]:
+            continue
+
+        if Ea < barrier_threshold:
+            decomposition_reactions.append(line)
+            reaction_barriers.append(Ea)
+
+    stable = len(decomposition_reactions) == 0
+
+    return {
+        "stable": stable,
+        "decomposition_reactions": decomposition_reactions,
+        "reaction_barriers": reaction_barriers,
+    }

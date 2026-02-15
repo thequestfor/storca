@@ -76,3 +76,46 @@ def run_orca(
         "xyz": inp_file.with_suffix(".xyz"),
         "out": out_file
     }
+def run_rmg(
+    input_file: Path,
+    rmg_env: str = "rmg_env",
+    rmg_command: str = "rmg.py",
+) -> None:
+    """
+    Run RMG using 'conda run' so this works from any Python environment.
+
+    Parameters
+    ----------
+    input_file : Path
+        The RMG input script (e.g., 'input.py').
+    rmg_env : str
+        Name of the conda environment containing RMG.
+    rmg_command : str
+        The RMG executable name (usually 'rmg.py').
+    
+    Raises
+    ------
+    subprocess.CalledProcessError
+        If the RMG run fails.
+    """
+    # Ensure the working directory exists
+    workdir = input_file.parent
+    workdir.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        "conda", "run", "-n", rmg_env,
+        rmg_command,
+        str(input_file.name),
+    ]
+
+    # Run RMG in the directory containing input_file
+    result = subprocess.run(
+        cmd,
+        cwd=workdir,           # <-- ensures RMG.log is created here
+        check=True,            # raises CalledProcessError on failure
+        capture_output=True,   # capture stdout/stderr
+        text=True,
+    )
+
+    print(result.stdout)
+    print(result.stderr)

@@ -1,5 +1,8 @@
 # src/inputgen.py
 from pathlib import Path
+import subprocess
+import textwrap
+import re
 import shutil
 
 
@@ -99,3 +102,86 @@ def create_orca_input(
     inp_file.write_text("\n".join(lines))
 
     return inp_file
+
+
+
+import textwrap
+from pathlib import Path
+
+def create_rmg_input(
+    label: str,
+    smiles: str,
+    workdir: Path,
+    temperature: float = 298.0,
+    pressure: float = 1.0,
+    termination_time: float = 1e7,
+) -> Path:
+    """
+    Generate an RMG input.py file for stability testing.
+    This version does NOT set an output directory, so logs go directly
+    into the current working directory (workdir).
+
+    Args:
+        label: Species label
+        smiles: SMILES string
+        workdir: Directory where input/output live
+        temperature: K
+        pressure: bar
+        termination_time: seconds
+
+    Returns:
+        Path to input.py
+    """
+    workdir.mkdir(parents=True, exist_ok=True)
+    input_file = workdir / "input.py"
+
+    content = textwrap.dedent(f"""
+    database(
+        thermoLibraries=['primaryThermoLibrary'],
+        reactionLibraries=[],
+        seedMechanisms=[],
+        kineticsDepositories=['training'],
+        kineticsFamilies='default',
+        kineticsEstimator='rate rules',
+    )
+
+    species(
+        label='{label}',
+        reactive=True,
+        structure=SMILES('{smiles}'),
+    )
+
+    generatedSpeciesConstraints(
+        allowed=('input species',)
+    )
+
+    simpleReactor(
+        temperature=({temperature}, 'K'),
+        pressure=({pressure}, 'bar'),
+        initialMoleFractions={{
+            '{label}': 1.0,
+        }},
+        terminationTime=({termination_time}, 's'),
+    )
+
+    simulator(
+        atol=1e-16,
+        rtol=1e-8,
+    )
+
+    model(
+        toleranceMoveToCore=1e-1,
+        toleranceInterruptSimulation=1e8,
+        maximumEdgeSpecies=1000,
+    )
+
+    options(
+        units='si',
+        saveSimulationProfiles=True,
+        generateOutputHTML=True,
+        generatePlots=False
+    )
+    """)
+
+    input_file.write_text(content.strip() + "\n")
+    return input_file

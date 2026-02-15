@@ -7,15 +7,22 @@ import subprocess
 import time
 import threading
 import numpy as np
-from src.inputgen import create_orca_input
-from src.orca_runner import run_orca
+from src.inputgen import (
+    create_orca_input,
+    create_rmg_input
+)
+from src.orca_runner import (
+    run_orca,
+    run_rmg
+)
 from src.parser import (
     parse_orca_orbitals,
     parse_orca_energy,
     parse_orca_ir,
     parse_goat_out,
     parse_xyz_ensemble,
-    attach_xyz_to_conformers
+    attach_xyz_to_conformers,
+    parse_chemkin_annotated
 )
 from src.converter import gbw_to_wfn
 from src.wfngrid import run_multiwfn_fukui
@@ -220,6 +227,49 @@ def compress_wavenumber(freq_raw):
     
     return freq_raw * scale
 
+def run_stability_analysis(
+    smiles: str,
+    rmg_env: str = "rmg_env",
+    rmg_command: str = "rmg.py",
+):
+    typer.echo("\n=== Running RMG Stability Analysis ===")
+
+    # Main working directory
+    workdir = Path("rmg_stability")
+    workdir.mkdir(parents=True, exist_ok=True)
+
+    # Generate RMG input
+    species_label = "stability"
+    input_py = create_rmg_input(species_label, smiles, workdir)
+
+    typer.echo(f"RMG input generated: {input_py}")
+    typer.echo("Launching RMG... (this may take time)")
+
+    # Run RMG
+    try:
+        run_rmg(input_file=input_py, rmg_env=rmg_env)
+    except subprocess.CalledProcessError as e:
+        typer.echo(f"⚠ RMG failed:\n{e.stdout}\n{e.stderr}")
+        return
+
+    typer.echo("RMG finished. Parsing results...")
+
+    # Parse annotated Chemkin output
+    chemkin_file = workdir / "chemkin" / "chem_annotated.inp"
+    result = parse_chemkin_annotated(chemkin_file)
+
+    typer.echo("\n=== Stability Assessment ===")
+    typer.echo(f"Stable: {result['stable']}")
+
+    if not result["stable"]:
+        typer.echo("\nDecomposition reactions detected:")
+        for rxn in result["decomposition_reactions"]:
+            typer.echo(f"  {rxn}")
+
+        if result["reaction_barriers"]:  # updated key
+            typer.echo("\nReaction barriers (kcal/mol):")
+            for barrier in result["reaction_barriers"]:
+                typer.echo(f"  {barrier:.3f}")
 def run_conformers(
     xyz_initial: str = typer.Option(..., help="filename of XYZ geometry of molecule"),
     out_dir: Path = typer.Option(Path("conformers"), help="Output directory"),
@@ -651,7 +701,7 @@ def run(
         raise FileNotFoundError(f"XYZ file not found: {xyz_file}")
 
     while True:
-        choice = Prompt.ask("\nSelect a section to view", choices=["descriptors", "pubchem", "ORCA", "spec", "exit"])
+        choice = Prompt.ask("\nSelect a section to view", choices=["descriptors", "pubchem", "ORCA", "spec", "stability", "exit"])
         if choice == "descriptors":
             if info:
                 display_descriptors(info)
@@ -677,7 +727,15 @@ def run(
                 )
             else:
                 typer.echo("Conformer generation currently only supported from SMILES input.")
-        
+        elif choice == "stability":
+            if smiles_value:
+                typer.echo("Running stability analysis...")
+
+                # Provide all required arguments
+                run_stability_analysis(
+                    smiles=smiles_value,
+                    rmg_env="rmg_env",  # default, can also make this configurable
+                )
         elif choice == "exit":
             typer.echo("Exiting.")
             break
