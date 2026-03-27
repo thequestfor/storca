@@ -9,7 +9,11 @@ It can:
 3. Perform single-point calculations for neutral, cationic, and anionic states
 4. Convert ORCA `.gbw` files to `.wfn` files
 5. Parse HOMO, LUMO, and orbital energies automatically
-6. Generate practical hazard estimates and chemical descriptors (SMILES, molecular weight, TPSA, XLogP)
+6. Predict IR spectroscopy results for any given molecule
+7. Predict stability of molecule in vacuum or STP air (ALPHA)
+8. Generate practical hazard estimates and chemical descriptors (SMILES, molecular weight, TPSA, XLogP)
+**NOTE:** ALWAYS read SDS if working with chemicals. hazard estimates are NOT comprehensive and toxicology is an entire science on its own.
+
 
 With this workflow, users can:
 
