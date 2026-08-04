@@ -1,0 +1,262 @@
+{
+  "aggregate": {
+    "mean_pearson_correlation": 0.3901907248078455,
+    "mean_rmse": 25.38562744383407,
+    "median_pearson_correlation": 0.40611974669727274
+  },
+  "entries": [
+    {
+      "id": "acetic-anhydride-ccl4",
+      "metrics": {
+        "best_global_shift_cm-1": -0.0,
+        "overlap_cm-1": [
+          408.0,
+          3984.848484848485
+        ],
+        "pearson_correlation": 0.541435737971506,
+        "points": 681,
+        "raw": {
+          "pearson_correlation": 0.541435737971506,
+          "rmse": 14.999692573899326
+        },
+        "rmse": 14.999692573899326,
+        "shift_aligned": {
+          "overlap_cm-1": [
+            408.0,
+            3984.848484848485
+          ],
+          "pearson_correlation": 0.541435737971506,
+          "points": 681,
+          "rmse": 14.999692573899326
+        },
+        "shift_search_cm-1": {
+          "step": 1.0,
+          "window": 0.0
+        }
+      },
+      "smiles": "CC(=O)OC(C)=O"
+    },
+    {
+      "id": "glycolaldehyde-dimer-kbr",
+      "metrics": {
+        "best_global_shift_cm-1": -0.0,
+        "overlap_cm-1": [
+          408.0,
+          3984.848484848485
+        ],
+        "pearson_correlation": 0.27080375542303947,
+        "points": 681,
+        "raw": {
+          "pearson_correlation": 0.27080375542303947,
+          "rmse": 28.436352418944786
+        },
+        "rmse": 28.436352418944786,
+        "shift_aligned": {
+          "overlap_cm-1": [
+            408.0,
+            3984.848484848485
+          ],
+          "pearson_correlation": 0.27080375542303947,
+          "points": 681,
+          "rmse": 28.436352418944786
+        },
+        "shift_search_cm-1": {
+          "step": 1.0,
+          "window": 0.0
+        }
+      },
+      "smiles": "O1CC(O)OCC1O"
+    },
+    {
+      "id": "benzene-liquid-film",
+      "metrics": {
+        "best_global_shift_cm-1": -0.0,
+        "overlap_cm-1": [
+          408.0,
+          3984.848484848485
+        ],
+        "pearson_correlation": 0.7428587783519409,
+        "points": 681,
+        "raw": {
+          "pearson_correlation": 0.7428587783519409,
+          "rmse": 10.378899944173469
+        },
+        "rmse": 10.378899944173469,
+        "shift_aligned": {
+          "overlap_cm-1": [
+            408.0,
+            3984.848484848485
+          ],
+          "pearson_correlation": 0.7428587783519409,
+          "points": 681,
+          "rmse": 10.378899944173469
+        },
+        "shift_search_cm-1": {
+          "step": 1.0,
+          "window": 0.0
+        }
+      },
+      "smiles": "c1ccccc1"
+    },
+    {
+      "id": "hexane-ccl4",
+      "metrics": {
+        "best_global_shift_cm-1": -0.0,
+        "overlap_cm-1": [
+          408.0,
+          3984.848484848485
+        ],
+        "pearson_correlation": 0.5683952216469267,
+        "points": 681,
+        "raw": {
+          "pearson_correlation": 0.5683952216469267,
+          "rmse": 12.802983917202756
+        },
+        "rmse": 12.802983917202756,
+        "shift_aligned": {
+          "overlap_cm-1": [
+            408.0,
+            3984.848484848485
+          ],
+          "pearson_correlation": 0.5683952216469267,
+          "points": 681,
+          "rmse": 12.802983917202756
+        },
+        "shift_search_cm-1": {
+          "step": 1.0,
+          "window": 0.0
+        }
+      },
+      "smiles": "CCCCCC"
+    },
+    {
+      "id": "ethylamine-liquid-film",
+      "metrics": {
+        "best_global_shift_cm-1": -0.0,
+        "overlap_cm-1": [
+          408.0,
+          3984.848484848485
+        ],
+        "pearson_correlation": 0.04933488316423472,
+        "points": 681,
+        "raw": {
+          "pearson_correlation": 0.04933488316423472,
+          "rmse": 51.606138026682956
+        },
+        "rmse": 51.606138026682956,
+        "shift_aligned": {
+          "overlap_cm-1": [
+            408.0,
+            3984.848484848485
+          ],
+          "pearson_correlation": 0.04933488316423472,
+          "points": 681,
+          "rmse": 51.606138026682956
+        },
+        "shift_search_cm-1": {
+          "step": 1.0,
+          "window": 0.0
+        }
+      },
+      "smiles": "CCN"
+    },
+    {
+      "id": "ethanol-nist",
+      "metrics": {
+        "best_global_shift_cm-1": -0.0,
+        "overlap_cm-1": [
+          513.7524557956776,
+          3986.2475442043224
+        ],
+        "pearson_correlation": 0.5845934087156127,
+        "points": 506,
+        "raw": {
+          "pearson_correlation": 0.5845934087156127,
+          "rmse": 22.35909342223862
+        },
+        "rmse": 22.35909342223862,
+        "shift_aligned": {
+          "overlap_cm-1": [
+            513.7524557956776,
+            3986.2475442043224
+          ],
+          "pearson_correlation": 0.5845934087156127,
+          "points": 506,
+          "rmse": 22.35909342223862
+        },
+        "shift_search_cm-1": {
+          "step": 1.0,
+          "window": 0.0
+        }
+      },
+      "smiles": "CCO"
+    },
+    {
+      "id": "acetaldehyde-nist",
+      "metrics": {
+        "best_global_shift_cm-1": -0.0,
+        "overlap_cm-1": [
+          403.70020964360583,
+          3547.649895178197
+        ],
+        "pearson_correlation": 0.25888007534290675,
+        "points": 472,
+        "raw": {
+          "pearson_correlation": 0.25888007534290675,
+          "rmse": 32.37799498775731
+        },
+        "rmse": 32.37799498775731,
+        "shift_aligned": {
+          "overlap_cm-1": [
+            403.70020964360583,
+            3547.649895178197
+          ],
+          "pearson_correlation": 0.25888007534290675,
+          "points": 472,
+          "rmse": 32.37799498775731
+        },
+        "shift_search_cm-1": {
+          "step": 1.0,
+          "window": 0.0
+        }
+      },
+      "smiles": "CC=O"
+    },
+    {
+      "id": "dimethylamine-nist",
+      "metrics": {
+        "best_global_shift_cm-1": -0.0,
+        "overlap_cm-1": [
+          513.7524557956776,
+          3986.2475442043224
+        ],
+        "pearson_correlation": 0.10522393784659666,
+        "points": 506,
+        "raw": {
+          "pearson_correlation": 0.10522393784659666,
+          "rmse": 30.123864259773345
+        },
+        "rmse": 30.123864259773345,
+        "shift_aligned": {
+          "overlap_cm-1": [
+            513.7524557956776,
+            3986.2475442043224
+          ],
+          "pearson_correlation": 0.10522393784659666,
+          "points": 506,
+          "rmse": 30.123864259773345
+        },
+        "shift_search_cm-1": {
+          "step": 1.0,
+          "window": 0.0
+        }
+      },
+      "smiles": "CN(C)"
+    }
+  ],
+  "evaluated_entries": 8,
+  "limitations": "Aggregate scores span heterogeneous experimental references and are for method-ranking development only.",
+  "manifest": "benchmarks/manifest.json",
+  "missing_entries": [],
+  "profile": "b3lyp-def2-svp"
+}

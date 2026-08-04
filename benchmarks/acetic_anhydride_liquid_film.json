@@ -1,0 +1,18 @@
+{
+  "compound": "acetic anhydride",
+  "cas_number": "108-24-7",
+  "source_image": "108-24-7_IR2.gif",
+  "digitized_csv": "acetic_anhydride_liquid_film_transmittance.csv",
+  "digitization": {
+    "method": "calibrated trace from supplied SDBS-style image",
+    "wavenumber_range_cm-1": [4000, 400],
+    "y_axis": "transmittance_percent"
+  },
+  "conditions": {
+    "phase": "liquid_film",
+    "solvent": "neat",
+    "temperature_K": null,
+    "concentration": null,
+    "measurement": "liquid film"
+  }
+}

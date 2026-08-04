@@ -1,9 +1,33 @@
 # Ignore everything by default
 *
 
+
 # Whitelist essential files
 !README.md
 !.gitignore
 !*.py
 !src/
+!src/**
+!storca/
+!storca/**
+!tests/
+!tests/**
+!pyproject.toml
+!METHODS.md
+!LIMITATIONS.md
+!examples/
+!examples/**
+!benchmarks/
+!benchmarks/**
+!references/
+!references/*.csv
+!references/*.json
 !requirements.txt
+
+# Local development artifacts
+.DS_Store
+.idea/
+*.swp
+__pycache__/
+*.py[cod]
+references/*.pdf

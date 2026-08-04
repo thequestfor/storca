@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "kind": "condition_specific_persistence_benchmark",
+  "status": "draft",
+  "default_conditions": {
+    "temperature_K": 298.15,
+    "pressure_bar": 1.0,
+    "atmosphere": "air",
+    "phase": "ordinary condensed-phase handling",
+    "persistence_target": "at least 24 hours"
+  },
+  "entries": [
+    {
+      "id": "water-ambient",
+      "smiles": "O",
+      "charge": 0,
+      "multiplicity": 1,
+      "evidence_status": "draft",
+      "proposed_category": "ordinary_condition_persistent",
+      "review_note": "Persistent control candidate; add condition-matched source before accepting."
+    },
+    {
+      "id": "ethanol-ambient",
+      "smiles": "CCO",
+      "charge": 0,
+      "multiplicity": 1,
+      "evidence_status": "draft",
+      "proposed_category": "ordinary_condition_persistent",
+      "review_note": "Persistent organic control candidate; add condition-matched source before accepting."
+    },
+    {
+      "id": "benzene-ambient",
+      "smiles": "c1ccccc1",
+      "charge": 0,
+      "multiplicity": 1,
+      "evidence_status": "draft",
+      "proposed_category": "ordinary_condition_persistent",
+      "review_note": "Persistent aromatic control candidate; add condition-matched source before accepting."
+    },
+    {
+      "id": "hydrogen-peroxide-ambient",
+      "smiles": "OO",
+      "charge": 0,
+      "multiplicity": 1,
+      "evidence_status": "draft",
+      "proposed_category": "reactive_but_isolable",
+      "review_note": "Reactive-but-isolable candidate; evidence must state concentration, storage, and catalyst exposure."
+    },
+    {
+      "id": "acetic-anhydride-moist-air",
+      "smiles": "CC(=O)OC(C)=O",
+      "charge": 0,
+      "multiplicity": 1,
+      "evidence_status": "draft",
+      "proposed_category": "reactive_but_isolable",
+      "review_note": "Hydrolysis-sensitive candidate; conditions must explicitly include humidity/water exposure."
+    },
+    {
+      "id": "hydrogen-tetraoxide-ambient",
+      "smiles": "OOOO",
+      "charge": 0,
+      "multiplicity": 1,
+      "evidence_status": "draft",
+      "proposed_category": "transient",
+      "review_note": "Transient-candidate example; preserve source and exact experimental/theoretical conditions before acceptance."
+    }
+  ]
+}

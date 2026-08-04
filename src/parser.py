@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import List, Tuple
 from collections import defaultdict
+import math
 import os
 import re
 
@@ -41,24 +42,31 @@ def parse_orca_orbitals(out_file: Path) -> dict:
         return {"homo_number": None, "homo_energy": None,
                 "lumo_number": None, "lumo_energy": None}
 
-    homo_orb = max([o for o in orbitals if o["occ"] > 0], key=lambda x: x["no"])
-    lumo_orb = min([o for o in orbitals if o["occ"] == 0], key=lambda x: x["no"])
+    occupied = [o for o in orbitals if o["occ"] > 0]
+    virtual = [o for o in orbitals if o["occ"] == 0]
+    homo_orb = max(occupied, key=lambda x: x["no"]) if occupied else None
+    lumo_orb = min(virtual, key=lambda x: x["no"]) if virtual else None
 
     return {
-        "homo_number": homo_orb["no"],
-        "homo_energy": homo_orb["ev"],
-        "lumo_number": lumo_orb["no"],
-        "lumo_energy": lumo_orb["ev"]
+        "homo_number": homo_orb["no"] if homo_orb else None,
+        "homo_energy": homo_orb["ev"] if homo_orb else None,
+        "lumo_number": lumo_orb["no"] if lumo_orb else None,
+        "lumo_energy": lumo_orb["ev"] if lumo_orb else None,
     }
 
 def parse_orca_energy(out_file: Path) -> float:
     """
-    Extract the final SCF energy from an ORCA output file.
-    Looks for the last 'Energy :' line and returns the value in Hartree.
+    Extract the final ORCA energy in Hartree.
     """
     energy = None
     with open(out_file) as f:
         for line in f:
+            if "FINAL SINGLE POINT ENERGY" in line:
+                try:
+                    energy = float(line.split()[-1])
+                    continue
+                except ValueError:
+                    continue
             if "Energy" in line and "Eh" in line:
                 try:
                     # Split on ':' and take the numeric part before 'Eh'
@@ -231,7 +239,7 @@ def merge_weighted_ir(
 
 from pathlib import Path
 
-def parse_orca_ir(file_path: str):
+def parse_orca_ir(file_path: str | Path):
     """
     Parse ORCA IR output file for frequencies, epsilon, and intensity.
 
@@ -247,16 +255,21 @@ def parse_orca_ir(file_path: str):
     # Find the line that says "IR SPECTRUM"
     for i, line in enumerate(lines):
         if "IR SPECTRUM" in line:
-            start_data = i + 6  # skip 6 lines to get to actual data
+            start_data = i + 1
             break
     else:
         raise RuntimeError("IR SPECTRUM section not found in ORCA output")
 
-    # Parse table
+    # Parse table. Header layout differs between ORCA versions, so only rows
+    # whose first four fields are numeric are accepted. Blank lines before the
+    # first mode are header spacing; blank lines after modes end the table.
+    table_started = False
     for line in lines[start_data:]:
         line = line.strip()
         if not line or line.startswith("*"):
-            # Stop at blank line or footer
+            if not table_started:
+                continue
+            # Stop at a blank line or footer after at least one data row.
             break
 
         # Split tokens
@@ -266,10 +279,19 @@ def parse_orca_ir(file_path: str):
             continue
 
         # Extract data
-        mode = int(tokens[0].rstrip(":"))
-        freq = float(tokens[1])
-        eps = float(tokens[2])
-        intensity = float(tokens[3])
+        try:
+            mode = int(tokens[0].rstrip(":"))
+            freq = float(tokens[1].replace("D", "E").replace("d", "e"))
+            eps = float(tokens[2].replace("D", "E").replace("d", "e"))
+            intensity = float(tokens[3].replace("D", "E").replace("d", "e"))
+        except ValueError:
+            continue
+
+        if (mode < 0 or not all(math.isfinite(value) for value in (freq, eps, intensity))
+                or intensity < 0):
+            continue
+
+        table_started = True
 
         vibrations.append({
             "mode": mode,
@@ -278,53 +300,152 @@ def parse_orca_ir(file_path: str):
             "intensity": intensity
         })
 
+    if not vibrations:
+        raise RuntimeError("IR SPECTRUM section contained no parseable finite modes")
     return vibrations
 
 
-def parse_chemkin_annotated(chemkin_file: Path, barrier_threshold: float = 50.0) -> dict:
+def classify_chemkin_route(reaction_equation: str, label: str = "stability") -> dict:
+    """Classify the reactant context of an RMG/Chemkin route.
+
+    The classification concerns the forward direction as written by RMG.  It
+    describes whether the target can react alone or requires another species;
+    it is not proof that a co-reactant is present in a real storage system.
+    """
+    try:
+        lhs, _ = re.split(r"<=>|=>", reaction_equation, maxsplit=1)
+    except ValueError as error:
+        raise ValueError(f"Chemkin reaction has no supported arrow: {reaction_equation}") from error
+
+    reactants = []
+    for item in lhs.split("+"):
+        token = item.strip()
+        if not token:
+            continue
+        coefficient_match = re.match(r"^(?P<coefficient>\d+(?:\.\d+)?)\s+(?P<label>.+)$", token)
+        coefficient = float(coefficient_match.group("coefficient")) if coefficient_match else 1.0
+        species_label = coefficient_match.group("label") if coefficient_match else token
+        # RMG Chemkin labels species with a numeric index, e.g. stability(1).
+        species_label = re.sub(r"\(\d+\)$", "", species_label).strip()
+        reactants.append({"label": species_label, "stoichiometry": coefficient})
+
+    target_stoichiometry = sum(item["stoichiometry"] for item in reactants if item["label"] == label)
+    co_reactants = [item for item in reactants if item["label"] != label]
+    radical_co_reactants = [item["label"] for item in co_reactants if re.search(r"\[[^\]]+\]", item["label"])]
+    if target_stoichiometry <= 0:
+        raise ValueError(f"Target label '{label}' is not a reactant in: {reaction_equation}")
+    if not co_reactants and target_stoichiometry == 1:
+        context = "unimolecular_decomposition"
+    elif not co_reactants and target_stoichiometry > 1:
+        context = "self_reaction"
+    elif radical_co_reactants:
+        context = "radical_or_impurity_initiated"
+    else:
+        context = "co_reactant_dependent"
+    return {
+        "route_context": context,
+        "target_stoichiometry": target_stoichiometry,
+        "co_reactants": co_reactants,
+        "radical_co_reactants": radical_co_reactants,
+    }
+
+
+def parse_chemkin_annotated(
+    chemkin_file: Path,
+    barrier_threshold: float = 50.0,
+    label: str = "stability",
+) -> dict:
     """
     Determine kinetic stability from chem_annotated.inp.
     
     A species is considered unstable if it appears as a reactant
     in any decomposition reaction with barrier below the threshold.
-    The species under investigation is always 'stability'.
+    The investigated species can be selected with *label*.
     """
-    label = "stability"
     text = chemkin_file.read_text()
+
+    # Chemkin's third Arrhenius coefficient uses the energy unit declared on
+    # the REACTIONS line.  RMG normally writes this declaration, and silently
+    # treating an undeclared value as kcal/mol would make the screen unsafe.
+    energy_units = {
+        "KCAL/MOLE": 1.0,
+        "CAL/MOLE": 0.001,
+        "KJOULES/MOLE": 0.239005736,
+        "JOULES/MOLE": 0.000239005736,
+    }
+    header = re.search(r"^\s*REACTIONS\b(?P<units>[^\n]*)", text, re.IGNORECASE | re.MULTILINE)
+    declared_units = header.group("units").upper().replace(" ", "") if header else ""
+    source_unit = next((unit for unit in energy_units if unit in declared_units), None)
 
     decomposition_reactions = []
     reaction_barriers = []
+    candidate_routes = []
 
     reactions_section = re.search(r"REACTIONS.*?END", text, re.DOTALL | re.IGNORECASE)
     if not reactions_section:
-        return {"stable": True, "decomposition_reactions": [], "reaction_barriers": []}
+        return {
+            "stable": True,
+            "decomposition_reactions": [],
+            "reaction_barriers": [],
+            "candidate_routes": [],
+            "activation_energy_source_unit": source_unit,
+            "activation_energy_unit": "kcal/mol",
+        }
+    if source_unit is None:
+        raise ValueError(
+            "Chemkin REACTIONS header must declare activation-energy units "
+            "(for example KCAL/MOLE or CAL/MOLE)"
+        )
 
     for line in reactions_section.group(0).splitlines():
         line = line.strip()
         if not line or line.startswith("!") or "<=>" not in line:
             continue
 
-        try:
-            reaction_part, *rest = line.split()
-            Ea = float(rest[-1])
-        except Exception:
+        match = re.match(
+            r"^(?P<reaction>.+?(?:<=>|=>).+?)\s+"
+            r"(?P<a>[-+0-9.Ee]+)\s+(?P<n>[-+0-9.Ee]+)\s+(?P<ea>[-+0-9.Ee]+)"
+            r"(?:\s*!.*)?$",
+            line,
+        )
+        if not match:
             continue
+        reaction_part = match.group("reaction")
+        Ea = float(match.group("ea")) * energy_units[source_unit]
+        lhs, rhs = re.split(r"<=>|=>", reaction_part, maxsplit=1)
+        clean_species = lambda item: re.sub(r"^\d+(?:\.\d+)?\s*|\(\d+\)", "", item).strip()
+        lhs_species = [clean_species(species) for species in lhs.split("+")]
+        rhs_species = [clean_species(species) for species in rhs.split("+")]
 
-        lhs, rhs = reaction_part.split("<=>")
-        lhs_species = [re.sub(r"\(\d+\)", "", s.strip()) for s in lhs.split("+")]
-        rhs_species = [re.sub(r"\(\d+\)", "", s.strip()) for s in rhs.split("+")]
-
-        # Only count as decomposition if label is on LHS
-        if label not in lhs_species:
-            continue
-
-        # Ignore trivial identity reactions
-        if rhs_species == [label]:
-            continue
-
-        if Ea < barrier_threshold:
+        # Chemkin may write a reversible reaction in either direction.  The
+        # Arrhenius parameters belong only to the printed forward direction;
+        # never reuse them as a reverse decomposition barrier.
+        if label in lhs_species:
+            if rhs_species == [label]:
+                continue
+            if Ea >= barrier_threshold:
+                continue
             decomposition_reactions.append(line)
             reaction_barriers.append(Ea)
+            candidate_routes.append({
+                "reaction": line,
+                "reaction_equation": reaction_part,
+                "activation_energy_kcal_mol": Ea,
+                "direction": "chemkin_forward",
+                "kinetics_representation": "printed_arrhenius",
+                **classify_chemkin_route(reaction_part, label=label),
+            })
+        elif "<=>" in reaction_part and label in rhs_species:
+            reverse_equation = f"{rhs.strip()}<=>{lhs.strip()}"
+            candidate_routes.append({
+                "reaction": line,
+                "reaction_equation": reverse_equation,
+                "printed_reaction_equation": reaction_part,
+                "activation_energy_kcal_mol": None,
+                "direction": "reverse_of_chemkin_direction",
+                "kinetics_representation": "reversible_rate_requires_thermodynamic_reverse",
+                **classify_chemkin_route(reverse_equation, label=label),
+            })
 
     stable = len(decomposition_reactions) == 0
 
@@ -332,4 +453,7 @@ def parse_chemkin_annotated(chemkin_file: Path, barrier_threshold: float = 50.0)
         "stable": stable,
         "decomposition_reactions": decomposition_reactions,
         "reaction_barriers": reaction_barriers,
+        "candidate_routes": candidate_routes,
+        "activation_energy_source_unit": source_unit,
+        "activation_energy_unit": "kcal/mol",
     }

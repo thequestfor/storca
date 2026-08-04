@@ -1,0 +1,12 @@
+{
+  "compound": "hexane",
+  "formula": "C6H14",
+  "source_image": "hexane.jpg",
+  "sdbs_number": "2118",
+  "measurement": "CCl4 solution",
+  "phase": "solution",
+  "solvent": "CCl4",
+  "temperature_K": null,
+  "digitized_spectrum": "hexane_ccl4_transmittance.csv",
+  "digitization_axis": "SDBS non-linear printed wavenumber calibration"
+}

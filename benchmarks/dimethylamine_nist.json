@@ -1,0 +1,12 @@
+{
+  "compound": "dimethylamine",
+  "formula": "C2H7N",
+  "source_image": "dimethylamine.png",
+  "source": "NIST Chemistry WebBook",
+  "measurement": "not stated in supplied image",
+  "phase": "unspecified",
+  "solvent": "unspecified",
+  "temperature_K": null,
+  "digitized_spectrum": "dimethylamine_nist_transmittance.csv",
+  "digitization_axis": "linear 4000 to 500 cm^-1; image-specific calibrated plot bounds"
+}

@@ -1,0 +1,51 @@
+{
+  "smiles": "NNO",
+  "dark_inert": {
+    "assessment": {
+      "status": "stable",
+      "reason": "No credible radical initiation was demonstrated from the declared initial conditions, and no candidate route is kinetically relevant in the retained RMG profile."
+    },
+    "orca_evidence": {"status": "completed"},
+    "rmg_evidence": {
+      "status": "completed",
+      "kinetic_relevance": {
+        "status": "reachable_but_below_loss_threshold",
+        "estimated_time_to_retention_seconds": null
+      }
+    },
+    "condition_contract": {
+      "scenario": "dry-inert-gas-screen",
+      "retention_fraction": 0.95
+    },
+    "kinetic_lifetime": {
+      "estimated_time_to_retention_seconds": null,
+      "screening_estimated_time_to_retention_seconds": null
+    }
+  },
+  "dark_air": {
+    "assessment": {
+      "status": "orca_initiation_ts_verification_required",
+      "reason": "ORCA validated the endpoints of the earliest target-consuming route, but its H-transfer TS/rate has not been verified."
+    },
+    "orca_evidence": {"status": "completed"},
+    "rmg_evidence": {
+      "status": "completed",
+      "kinetic_relevance": {
+        "status": "kinetically_relevant_candidate",
+        "estimated_time_to_retention_seconds": 207.74217258784591
+      }
+    },
+    "condition_contract": {
+      "scenario": "ambient-air-gas-screen",
+      "retention_fraction": 0.95
+    },
+    "kinetic_lifetime": {
+      "estimated_time_to_retention_seconds": null,
+      "screening_estimated_time_to_retention_seconds": 207.74217258784591
+    },
+    "orca_initiation_verification": {
+      "status": "requires_h_transfer_ts_verification",
+      "rate_status": "not_calculated"
+    }
+  }
+}

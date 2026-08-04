@@ -25,8 +25,12 @@ def build_ir_spectrum(
         freqs: np.ndarray
         spectrum: np.ndarray
     """
-    freqs = np.arange(freq_min, freq_max + resolution, resolution)
-    spectrum = np.zeros_like(freqs)
+    if not all(np.isfinite(value) for value in (freq_min, freq_max, resolution, fwhm, scale_factor)):
+        raise ValueError("Spectrum settings must be finite")
+    if freq_min >= freq_max or resolution <= 0 or fwhm <= 0 or scale_factor <= 0:
+        raise ValueError("Invalid spectrum range, resolution, FWHM, or scale factor")
+    freqs = np.arange(freq_min, freq_max + resolution * 0.5, resolution)
+    spectrum = np.zeros_like(freqs, dtype=float)
 
     # Convert FWHM → sigma
     sigma = fwhm / (2.0 * np.sqrt(2.0 * np.log(2.0)))
@@ -41,10 +45,11 @@ def build_ir_spectrum(
 
         for nu, intensity in zip(c["ir_freqs"], c["ir_intensities"]):
             nu_scaled = nu * scale_factor
+            if not np.isfinite(nu) or not np.isfinite(intensity) or intensity < 0:
+                continue
             gaussian = intensity * np.exp(
                 -0.5 * ((freqs - nu_scaled) / sigma) ** 2
-            )
+            ) / (sigma * np.sqrt(2.0 * np.pi))
             spectrum += weight * gaussian
 
     return freqs, spectrum
-

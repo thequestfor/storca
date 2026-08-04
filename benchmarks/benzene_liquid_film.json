@@ -1,0 +1,12 @@
+{
+  "compound": "benzene",
+  "formula": "C6H6",
+  "source_image": "benzene.jpg",
+  "sdbs_number": "898",
+  "measurement": "liquid film",
+  "phase": "liquid",
+  "solvent": "neat",
+  "temperature_K": null,
+  "digitized_spectrum": "benzene_liquid_film_transmittance.csv",
+  "digitization_axis": "SDBS non-linear printed wavenumber calibration"
+}

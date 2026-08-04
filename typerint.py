@@ -742,4 +742,9 @@ def run(
 
 
 if __name__ == "__main__":
+    typer.echo(
+        "DEPRECATED: typerint.py is archived prototype code. Use `storca --help`; "
+        "the supported STORCA 2.0 path does not use Multiwfn.",
+        err=True,
+    )
     app()

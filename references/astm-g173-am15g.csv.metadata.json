@@ -1,0 +1,5 @@
+{
+  "source": "https://www.nrel.gov/grid/solar-resource/assets/data/astmg173.xls",
+  "machine_readable_copy": "https://raw.githubusercontent.com/pvlib/pvlib-python/main/pvlib/data/ASTMG173.csv",
+  "spectrum": "ASTM G173-03 AM1.5 global hemispherical / 37-degree tilt"
+}

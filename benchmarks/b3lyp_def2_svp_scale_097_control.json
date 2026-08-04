@@ -1,0 +1,115 @@
+{
+  "candidates": [
+    {
+      "aggregate": {
+        "matched_bands": 34,
+        "mean_absolute_position_error_cm-1": 17.404,
+        "mean_pearson_correlation": 0.40052786536823737,
+        "mean_rmse": 26.82918058555619
+      },
+      "entries": [
+        {
+          "id": "acetic-anhydride-ccl4",
+          "matched_bands": 9,
+          "mean_absolute_position_error_cm-1": 14.85,
+          "pearson_correlation": 0.541435737971506,
+          "rmse": 14.999692573899326
+        },
+        {
+          "id": "hexane-ccl4",
+          "matched_bands": 4,
+          "mean_absolute_position_error_cm-1": 15.16,
+          "pearson_correlation": 0.5683952216469267,
+          "rmse": 12.802983917202756
+        },
+        {
+          "id": "ethylamine-liquid-film",
+          "matched_bands": 9,
+          "mean_absolute_position_error_cm-1": 19.4,
+          "pearson_correlation": 0.04933488316423472,
+          "rmse": 51.606138026682956
+        },
+        {
+          "id": "ethanol-nist",
+          "matched_bands": 5,
+          "mean_absolute_position_error_cm-1": 10.97,
+          "pearson_correlation": 0.5845934087156127,
+          "rmse": 22.35909342223862
+        },
+        {
+          "id": "acetaldehyde-nist",
+          "matched_bands": 7,
+          "mean_absolute_position_error_cm-1": 26.64,
+          "pearson_correlation": 0.25888007534290675,
+          "rmse": 32.37799498775731
+        }
+      ],
+      "scale_factor": 0.97
+    }
+  ],
+  "holdout": {
+    "aggregate": {
+      "matched_bands": 26,
+      "mean_absolute_position_error_cm-1": 10.953333333333333,
+      "mean_pearson_correlation": 0.37296215720719234,
+      "mean_rmse": 22.979705540963867
+    },
+    "entries": [
+      {
+        "id": "benzene-liquid-film",
+        "matched_bands": 4,
+        "mean_absolute_position_error_cm-1": 6.65,
+        "pearson_correlation": 0.7428587783519409,
+        "rmse": 10.378899944173469
+      },
+      {
+        "id": "glycolaldehyde-dimer-kbr",
+        "matched_bands": 16,
+        "mean_absolute_position_error_cm-1": 11.08,
+        "pearson_correlation": 0.27080375542303947,
+        "rmse": 28.436352418944786
+      },
+      {
+        "id": "dimethylamine-nist",
+        "matched_bands": 6,
+        "mean_absolute_position_error_cm-1": 15.13,
+        "pearson_correlation": 0.10522393784659666,
+        "rmse": 30.123864259773345
+      }
+    ],
+    "scale_factor": 0.97
+  },
+  "holdout_ids": [
+    "benzene-liquid-film",
+    "glycolaldehyde-dimer-kbr",
+    "dimethylamine-nist"
+  ],
+  "kind": "transparent_harmonic_scale_calibration",
+  "limitations": "A global harmonic scale does not model solvent, phase, hydrogen bonding, anharmonicity, or instrument line shape. References must be compatible with the intended use case before accepting this calibration.",
+  "profile": "b3lyp-def2-svp",
+  "schema_version": 1,
+  "selection": {
+    "criterion": "minimum mean prominent-band position error on training set; correlation is a tiebreaker",
+    "selected_scale_factor": 0.97,
+    "training_metrics": {
+      "matched_bands": 34,
+      "mean_absolute_position_error_cm-1": 17.404,
+      "mean_pearson_correlation": 0.40052786536823737,
+      "mean_rmse": 26.82918058555619
+    }
+  },
+  "settings": {
+    "fwhm_cm-1": 15.0,
+    "scale_grid": [
+      0.97
+    ],
+    "temperature_K": 298.15
+  },
+  "training_ids": [
+    "acetic-anhydride-ccl4",
+    "hexane-ccl4",
+    "ethylamine-liquid-film",
+    "ethanol-nist",
+    "acetaldehyde-nist"
+  ]
+}

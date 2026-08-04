@@ -1,0 +1,12 @@
+{
+  "compound": "ethylamine",
+  "formula": "C2H7N",
+  "source_image": "ethylamine.jpg",
+  "sdbs_number": "1535",
+  "measurement": "liquid film",
+  "phase": "liquid",
+  "solvent": "neat",
+  "temperature_K": null,
+  "digitized_spectrum": "ethylamine_liquid_film_transmittance.csv",
+  "digitization_axis": "SDBS non-linear printed wavenumber calibration"
+}

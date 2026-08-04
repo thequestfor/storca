@@ -1,0 +1,12 @@
+{
+  "compound": "ethanol",
+  "formula": "C2H6O",
+  "source_image": "ethanol.png",
+  "source": "NIST Chemistry WebBook",
+  "measurement": "not stated in supplied image",
+  "phase": "unspecified",
+  "solvent": "unspecified",
+  "temperature_K": null,
+  "digitized_spectrum": "ethanol_nist_transmittance.csv",
+  "digitization_axis": "linear 4000 to 500 cm^-1; image-specific calibrated plot bounds"
+}

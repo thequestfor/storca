@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "purpose": "Development-only raw harmonic IR method selection. References retain their original measurement metadata and are not treated as identical sample conditions.",
+  "entries": [
+    {
+      "id": "acetic-anhydride-ccl4",
+      "smiles": "CC(=O)OC(C)=O",
+      "reference_spectrum": "acetic_anhydride_ccl4_transmittance.csv",
+      "metadata": "acetic_anhydride_ccl4_solution.json",
+      "baseline_spectra": {"b3lyp-def2-svp": "../runs/acetic-anhydride-baseline-20260728T181406Z/spectrum.csv"}
+    },
+    {
+      "id": "glycolaldehyde-dimer-kbr",
+      "smiles": "O1CC(O)OCC1O",
+      "reference_spectrum": "glycolaldehyde_dimer_kbr_transmittance.csv",
+      "metadata": "glycolaldehyde_dimer_kbr_disc.json",
+      "baseline_spectra": {"b3lyp-def2-svp": "../runs/glycolaldehyde-dimer-20260728T210911Z/spectrum_raw.csv"}
+    },
+    {
+      "id": "benzene-liquid-film",
+      "smiles": "c1ccccc1",
+      "reference_spectrum": "benzene_liquid_film_transmittance.csv",
+      "metadata": "benzene_liquid_film.json",
+      "baseline_spectra": {
+        "b3lyp-def2-svp": "../runs/benzene-practical-20260728T214344Z/spectrum_raw.csv",
+        "b3lyp-3c": "../runs/benzene-b3lyp-3c-20260728T231302Z/spectrum.csv",
+        "r2scan-3c": "../runs/benzene-r2scan-3c-20260728T231533Z/spectrum.csv"
+      }
+    },
+    {
+      "id": "hexane-ccl4",
+      "smiles": "CCCCCC",
+      "reference_spectrum": "hexane_ccl4_transmittance.csv",
+      "metadata": "hexane_ccl4_solution.json",
+      "baseline_spectra": {"b3lyp-def2-svp": "../runs/hexane-practical-20260728T215244Z/spectrum_raw.csv"}
+    },
+    {
+      "id": "ethylamine-liquid-film",
+      "smiles": "CCN",
+      "reference_spectrum": "ethylamine_liquid_film_transmittance.csv",
+      "metadata": "ethylamine_liquid_film.json",
+      "baseline_spectra": {"b3lyp-def2-svp": "../runs/ethylamine-practical-20260728T221330Z/spectrum_raw.csv"}
+    },
+    {
+      "id": "ethanol-nist",
+      "smiles": "CCO",
+      "reference_spectrum": "ethanol_nist_transmittance.csv",
+      "metadata": "ethanol_nist.json",
+      "baseline_spectra": {
+        "b3lyp-def2-svp": "../runs/ethanol-practical-20260728T222650Z/spectrum_raw.csv",
+        "r2scan-3c": "../runs/ethanol-r2scan-3c-20260728T231818Z/spectrum.csv"
+      }
+    },
+    {
+      "id": "acetaldehyde-nist",
+      "smiles": "CC=O",
+      "reference_spectrum": "acetaldehyde_nist_transmittance.csv",
+      "metadata": "acetaldehyde_nist.json",
+      "baseline_spectra": {
+        "b3lyp-def2-svp": "../runs/acetaldehyde-practical-20260728T223252Z/spectrum_raw.csv",
+        "r2scan-3c": "../runs/acetaldehyde-r2scan-3c-20260728T232102Z/spectrum.csv"
+      }
+    },
+    {
+      "id": "dimethylamine-nist",
+      "smiles": "CN(C)",
+      "reference_spectrum": "dimethylamine_nist_transmittance.csv",
+      "metadata": "dimethylamine_nist.json",
+      "baseline_spectra": {"b3lyp-def2-svp": "../runs/dimethylamine-raw-20260728T224222Z/spectrum.csv"}
+    }
+  ]
+}

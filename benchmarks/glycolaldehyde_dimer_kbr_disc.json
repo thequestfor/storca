@@ -1,0 +1,14 @@
+{
+  "compound": "2,5-dihydroxy-1,4-dioxane (glycolaldehyde dimer)",
+  "formula": "C4H8O4",
+  "source_image": "glycolaldehyde.jpg",
+  "sdbs_number": "12518",
+  "measurement": "KBr disc",
+  "phase": "solid dispersion",
+  "solvent": "KBr",
+  "temperature_K": null,
+  "concentration": null,
+  "digitized_spectrum": "glycolaldehyde_dimer_kbr_transmittance.csv",
+  "digitization_axis": "SDBS non-linear printed wavenumber calibration",
+  "notes": "A KBr-disc spectrum is a hydrogen-bonded solid-state reference, not an isolated-molecule or dilute-solution target."
+}

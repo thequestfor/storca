@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "storca"
+version = "0.1.0"
+description = "Reproducible ORCA calculation workflows"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "matplotlib>=3.7",
+    "numpy>=1.24",
+    "pillow>=10",
+    "typer>=0.12",
+    "rich>=13",
+]
+
+[project.optional-dependencies]
+chemistry = [
+    "rdkit>=2023.9",
+]
+dev = ["pytest>=8"]
+
+[project.scripts]
+storca = "storca.cli:app"
+
+[tool.setuptools]
+packages = ["storca", "src", "src.stability", "src.utils"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

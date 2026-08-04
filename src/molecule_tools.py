@@ -2,6 +2,7 @@ from pathlib import Path
 from rdkit import Chem
 from rdkit.Chem import AllChem, Draw
 from typing import List
+import math
 import numpy as np
 def sanitize_smiles(smiles: str) -> str:
     mol = Chem.MolFromSmiles(smiles)
@@ -28,6 +29,17 @@ def smiles_to_xyz(smiles: str, xyz_path: Path, n_confs: int = 10) -> Path:
     if mol is None:
         raise ValueError(f"Invalid SMILES: {smiles}")
     mol = Chem.AddHs(mol)
+
+    # Distance geometry has no degrees of freedom for a monatomic species.
+    # Standalone H/H+/H- is a valid reaction endpoint, so write the unique
+    # Cartesian seed directly instead of treating EmbedMultipleConfs' empty
+    # result as a chemistry failure.
+    if mol.GetNumAtoms() == 1:
+        atom = mol.GetAtomWithIdx(0)
+        xyz_path.write_text(
+            f"1\nGenerated monatomic endpoint\n{atom.GetSymbol()} 0.00000 0.00000 0.00000\n"
+        )
+        return xyz_path
 
     # Generate multiple conformers
     conf_ids = AllChem.EmbedMultipleConfs(mol, numConfs=n_confs, randomSeed=42)
@@ -180,14 +192,16 @@ def generate_unique_conformers(
 
 def compute_boltzmann_weights(conformers: list[dict], temperature: float = 298.15):
     """
-    Compute Boltzmann weights from ORCA energies and assign to conformers.
+    Compute Boltzmann weights from ORCA Hartree energies and assign them.
     """
     R = 0.0019872041  # kcal/mol·K
-    energies_kcal = [float(c["energy"]) for c in conformers if c["energy"] is not None]
-    if not energies_kcal:
+    energies_hartree = [float(c["energy"]) for c in conformers if c["energy"] is not None]
+    if not energies_hartree:
         raise RuntimeError("No conformer energies available.")
-    E_min = min(energies_kcal)
-    weights = [math.exp(-(E - E_min) / (R * temperature)) for E in energies_kcal]
+    if not math.isfinite(temperature) or temperature <= 0 or not all(math.isfinite(value) for value in energies_hartree):
+        raise ValueError("Temperature and conformer energies must be finite, with temperature greater than zero")
+    E_min = min(energies_hartree)
+    weights = [math.exp(-((energy - E_min) * 627.509474) / (R * temperature)) for energy in energies_hartree]
     Z = sum(weights)
     for conf, w in zip([c for c in conformers if c["energy"] is not None], weights):
         conf["weight"] = w / Z
@@ -222,6 +236,12 @@ def write_weighted_orca_freq(
         temperature: Boltzmann temperature in K
         output_file: Path to write the freq.out-style file
     """
+    raise RuntimeError(
+        "This archived helper cannot create a valid Molden vibrational file because the retained records lack "
+        "normal-mode displacement vectors. Use `storca spectrum` for CSV/PNG spectra and retain each ORCA freq.out "
+        "for animation-capable normal modes."
+    )
+
     import math
 
     # Boltzmann constant in kcal/mol·K

@@ -1,0 +1,128 @@
+{
+  "aggregate": {
+    "mean_pearson_correlation": 0.47917720597052244,
+    "mean_rmse": 22.145532731759243,
+    "median_pearson_correlation": 0.5447088295981436
+  },
+  "entries": [
+    {
+      "id": "benzene-liquid-film",
+      "metrics": {
+        "best_global_shift_cm-1": -0.0,
+        "overlap_cm-1": [
+          408.0,
+          3984.848484848485
+        ],
+        "pearson_correlation": 0.6353351689325045,
+        "points": 681,
+        "raw": {
+          "pearson_correlation": 0.6353351689325045,
+          "rmse": 11.221588466132216
+        },
+        "rmse": 11.221588466132216,
+        "shift_aligned": {
+          "overlap_cm-1": [
+            408.0,
+            3984.848484848485
+          ],
+          "pearson_correlation": 0.6353351689325045,
+          "points": 681,
+          "rmse": 11.221588466132216
+        },
+        "shift_search_cm-1": {
+          "step": 1.0,
+          "window": 0.0
+        }
+      },
+      "smiles": "c1ccccc1"
+    },
+    {
+      "id": "ethanol-nist",
+      "metrics": {
+        "best_global_shift_cm-1": -0.0,
+        "overlap_cm-1": [
+          513.7524557956776,
+          3986.2475442043224
+        ],
+        "pearson_correlation": 0.5447088295981436,
+        "points": 506,
+        "raw": {
+          "pearson_correlation": 0.5447088295981436,
+          "rmse": 22.872040364335817
+        },
+        "rmse": 22.872040364335817,
+        "shift_aligned": {
+          "overlap_cm-1": [
+            513.7524557956776,
+            3986.2475442043224
+          ],
+          "pearson_correlation": 0.5447088295981436,
+          "points": 506,
+          "rmse": 22.872040364335817
+        },
+        "shift_search_cm-1": {
+          "step": 1.0,
+          "window": 0.0
+        }
+      },
+      "smiles": "CCO"
+    },
+    {
+      "id": "acetaldehyde-nist",
+      "metrics": {
+        "best_global_shift_cm-1": -0.0,
+        "overlap_cm-1": [
+          403.70020964360583,
+          3547.649895178197
+        ],
+        "pearson_correlation": 0.2574876193809192,
+        "points": 472,
+        "raw": {
+          "pearson_correlation": 0.2574876193809192,
+          "rmse": 32.34296936480969
+        },
+        "rmse": 32.34296936480969,
+        "shift_aligned": {
+          "overlap_cm-1": [
+            403.70020964360583,
+            3547.649895178197
+          ],
+          "pearson_correlation": 0.2574876193809192,
+          "points": 472,
+          "rmse": 32.34296936480969
+        },
+        "shift_search_cm-1": {
+          "step": 1.0,
+          "window": 0.0
+        }
+      },
+      "smiles": "CC=O"
+    }
+  ],
+  "evaluated_entries": 3,
+  "limitations": "Aggregate scores span heterogeneous experimental references and are for method-ranking development only.",
+  "manifest": "benchmarks/manifest.json",
+  "missing_entries": [
+    {
+      "id": "acetic-anhydride-ccl4",
+      "reason": "No spectrum registered for profile 'r2scan-3c'"
+    },
+    {
+      "id": "glycolaldehyde-dimer-kbr",
+      "reason": "No spectrum registered for profile 'r2scan-3c'"
+    },
+    {
+      "id": "hexane-ccl4",
+      "reason": "No spectrum registered for profile 'r2scan-3c'"
+    },
+    {
+      "id": "ethylamine-liquid-film",
+      "reason": "No spectrum registered for profile 'r2scan-3c'"
+    },
+    {
+      "id": "dimethylamine-nist",
+      "reason": "No spectrum registered for profile 'r2scan-3c'"
+    }
+  ],
+  "profile": "r2scan-3c"
+}
