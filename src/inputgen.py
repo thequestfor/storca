@@ -155,8 +155,15 @@ def create_orca_neb_ts_input(
     ncores: int = 1,
     nimages: int = 8,
     method_keywords: list[str] | None = None,
+    preopt_ends: bool = False,
 ) -> Path:
-    """Create an ORCA 6 double-ended NEB-TS input."""
+    """Create an ORCA 6 double-ended NEB-TS input.
+
+    ``preopt_ends`` is appropriate only when both supplied endpoints are
+    physical bound minima.  It must remain false for assembled encounter
+    geometries of separated collision partners, because relaxing those ends
+    would silently change the declared channel.
+    """
     product_xyz = Path(product_xyz)
     if not product_xyz.is_file():
         raise FileNotFoundError(f"Product XYZ file not found: {product_xyz}")
@@ -171,7 +178,11 @@ def create_orca_neb_ts_input(
         multiplicity=multiplicity,
         ncores=ncores,
         keyword_line=_orca_method_line(method_keywords, "TightSCF", "NEB-TS"),
-        blocks=[f'%neb\n  Product "{product_xyz.name}"\n  NImages {nimages}\nend'],
+        blocks=[
+            f'%neb\n  Product "{product_xyz.name}"\n  NImages {nimages}'
+            + ("\n  PreOptEnds true" if preopt_ends else "")
+            + "\nend"
+        ],
     )
 
 

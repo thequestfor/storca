@@ -1207,6 +1207,10 @@ class FoundationTests(unittest.TestCase):
             reactant.write_text("2\nreactant\nH 0 0 0\nH 0 0 0.7\n")
             product.write_text("2\nproduct\nH 0 0 0\nH 0 0 3.5\n")
             neb = create_orca_neb_ts_input(reactant, product, charge=0, multiplicity=1)
+            preoptimized_neb = create_orca_neb_ts_input(
+                reactant, product, charge=0, multiplicity=1, label="preoptimized-neb",
+                preopt_ends=True,
+            )
             scan = create_orca_relaxed_scan_input(
                 reactant, bond_atom_indices=(0, 1), start_distance_angstrom=0.7,
                 end_distance_angstrom=3.5, charge=0, multiplicity=1,
@@ -1215,6 +1219,8 @@ class FoundationTests(unittest.TestCase):
             hessian.write_text("synthetic")
             irc = create_orca_irc_input(reactant, charge=0, multiplicity=1, hessian_file=hessian)
             self.assertIn('Product "product.xyz"', neb.read_text())
+            self.assertNotIn("PreOptEnds true", neb.read_text())
+            self.assertIn("PreOptEnds true", preoptimized_neb.read_text())
             self.assertIn("B 0 1 = 0.70000000, 3.50000000, 20", scan.read_text())
             self.assertIn('Hess_Filename "ts.hess"', irc.read_text())
 

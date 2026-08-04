@@ -912,10 +912,26 @@ def _run_generic_orientation(
         product_xyz = path_dir / "product.xyz"
         shutil.copy2(reactant_source, reactant_xyz)
         shutil.copy2(product_source, product_xyz)
+        # These endpoints have already been independently validated as
+        # minima.  Asking ORCA to preoptimize them once more makes the NEB
+        # robust to small residual forces.  Encounter geometries deliberately
+        # combine separated fragments at a selected orientation, so preopting
+        # those ends would change the reaction channel and is prohibited.
+        preopt_ends = not separated_fragments
         neb_input = create_orca_neb_ts_input(
             reactant_xyz, product_xyz, charge=route.charge, multiplicity=route.multiplicity,
             label="neb-ts", ncores=ncores, nimages=neb_images, method_keywords=method_keywords,
+            preopt_ends=preopt_ends,
         )
+        record["neb_endpoint_policy"] = {
+            "preopt_ends": preopt_ends,
+            "free_end_neb": False,
+            "reason": (
+                "both declared endpoints are bound, validated minima"
+                if preopt_ends else
+                "assembled separated-fragment encounter endpoints must retain their declared channel"
+            ),
+        }
         try:
             neb_execution = _run_or_resume(neb_input, timeout_seconds=timeout_seconds)
         except Exception as error:
@@ -1393,7 +1409,7 @@ def _run_neb(route: RouteSpec, explanation_dir: Path, *, prepare_only: bool,
     shutil.copy2(product_result["optimized_xyz"], product_xyz)
     neb_input = create_orca_neb_ts_input(
         reactant_xyz, product_xyz, charge=route.charge, multiplicity=route.multiplicity,
-        ncores=ncores, nimages=neb_images, method_keywords=method_keywords,
+        ncores=ncores, nimages=neb_images, method_keywords=method_keywords, preopt_ends=True,
     )
     neb_execution = _run_or_resume(neb_input, timeout_seconds=timeout_seconds)
     ts_xyz = _locate_neb_ts(path_dir, neb_input.stem)
