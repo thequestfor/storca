@@ -5,6 +5,9 @@ import signal
 import shutil
 import subprocess
 import time
+import queue
+import threading
+from collections.abc import Callable
 
 
 def find_orca() -> str:
@@ -34,10 +37,11 @@ def validate_orca_output(out_file: Path) -> dict:
 def run_orca(
     inp_file: Path,
     capture_out: bool = True,
-    stream_output=None,
+    stream_output: Callable[[str], None] | None = None,
     stdout_file: Path | None = None,
     extra_env: dict[str, str] | None = None,
     timeout_seconds: float | None = None,
+    live_output: bool | None = None,
 ) -> dict:
     """
     Run ORCA (or GOAT) on the given input file.
@@ -45,9 +49,13 @@ def run_orca(
     Args:
         inp_file: ORCA/GOAT input file
         capture_out: write a .out file (default True)
-        stream_output: optional callable(line) for real-time output monitoring
+        stream_output: optional callable(line) for real-time output monitoring.
+            A supplied callback takes precedence over ``live_output``.
         stdout_file: optional path to write stdout (default is inp_file.with_suffix('.out'))
         extra_env: environment variables required by this specific calculation
+        live_output: mirror ORCA's native ``.out`` stream to this process's
+            standard output.  Defaults to true; set ``STORCA_ORCA_LIVE_OUTPUT=0``
+            to suppress it globally, or pass ``False`` for one job.
 
     Returns:
         dict with keys: gbw, xyz, out
@@ -59,6 +67,17 @@ def run_orca(
     runtime_env.update(extra_env or {})
 
     out_file = stdout_file or (inp_file.with_suffix(".out") if capture_out else None)
+    if live_output is None:
+        live_output = os.environ.get("STORCA_ORCA_LIVE_OUTPUT", "1").strip().lower() not in {
+            "0", "false", "no", "off",
+        }
+
+    # ORCA output is the most useful progress indicator for expensive jobs.
+    # Retain the full file *and* mirror the exact stream to the calling
+    # terminal by default.  The reader thread lets us continue enforcing a
+    # timeout even when ORCA is temporarily quiet.
+    if stream_output is None and live_output:
+        stream_output = lambda line: print(line, end="", flush=True)
 
     if stream_output is None:
         # Buffered mode
@@ -86,8 +105,6 @@ def run_orca(
             raise RuntimeError(f"ORCA exited without normal-termination marker: check {out_file}")
 
     else:
-        if timeout_seconds is not None:
-            raise ValueError("timeout_seconds is only supported in buffered ORCA mode")
         # Streaming mode
         if out_file is None:
             raise ValueError("stdout_file must be provided when using stream_output")
@@ -103,10 +120,35 @@ def run_orca(
                 env=runtime_env,
             )
 
-            for line in proc.stdout:
-                f.write(line)
-                stream_output(line.rstrip())
+            assert proc.stdout is not None
+            lines: queue.Queue[str | None] = queue.Queue()
 
+            def _read_output() -> None:
+                try:
+                    for line in proc.stdout:
+                        lines.put(line)
+                finally:
+                    lines.put(None)
+
+            reader = threading.Thread(target=_read_output, name="storca-orca-output", daemon=True)
+            reader.start()
+            deadline = time.monotonic() + timeout_seconds if timeout_seconds is not None else None
+            ended = False
+            while not ended:
+                try:
+                    line = lines.get(timeout=0.2)
+                except queue.Empty:
+                    if deadline is not None and time.monotonic() > deadline:
+                        proc.kill()
+                        proc.wait()
+                        raise subprocess.TimeoutExpired([ORCA_CMD, inp_file.name], timeout_seconds)
+                    continue
+                if line is None:
+                    ended = True
+                    continue
+                f.write(line)
+                f.flush()
+                stream_output(line)
             proc.wait()
             if proc.returncode != 0:
                 raise RuntimeError(f"ORCA failed: check {out_file}")
