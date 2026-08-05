@@ -113,6 +113,10 @@ _NEB_INTERMEDIATE_WARNING = re.compile(
     r"Possible\s+intermediate\s+minimum\s+found\s+at\s+image\(s\):",
     re.IGNORECASE,
 )
+_NEB_ANGLE_WARNING = re.compile(
+    r"Warning:\s*maximum\s+angle\s+between\s+images\s*\(([^)]*)\)",
+    re.IGNORECASE,
+)
 
 
 def _neb_intermediate_image_indices(output: Path) -> list[int]:
@@ -127,6 +131,29 @@ def _neb_intermediate_image_indices(output: Path) -> list[int]:
     return sorted(set(indices))
 
 
+def _neb_angle_warning_image_indices(output: Path) -> list[int]:
+    """Extract the adjacent image pair from ORCA's path-cusp warning.
+
+    ORCA 6.1 can print an invalid first integer in this diagnostic.  The last
+    two integers are the meaningful adjacent image labels; the malformed
+    value is deliberately ignored.
+    """
+    output = Path(output)
+    if not output.is_file():
+        return []
+    indices: set[int] = set()
+    text = output.read_text(errors="replace")
+    for match in _NEB_ANGLE_WARNING.finditer(text):
+        values = re.findall(r"[-+]?\d+", match.group(1))
+        if len(values) < 2:
+            continue
+        for value in values[-2:]:
+            index = abs(int(value))
+            if index > 0:
+                indices.add(index)
+    return sorted(indices)
+
+
 def _validate_neb_intermediates(
     route: RouteSpec,
     *,
@@ -135,14 +162,16 @@ def _validate_neb_intermediates(
     ncores: int,
     method_keywords: list[str] | None,
     timeout_seconds: float | None,
+    candidate_indices: list[int] | None = None,
+    detection_source: str = "explicit_intermediate_warning",
 ) -> dict:
     """Optimize/frequency-check ORCA-flagged NEB intermediate images.
 
-    This intentionally establishes only a retained intermediate minimum and
-    two *prepared* elementary segments.  It does not assign a rate or infer a
+    This intentionally establishes only a retained intermediate/cusp minimum
+    and two elementary segment tasks.  It does not assign a rate or infer a
     reaction family from a geometry; each segment still needs its own TS/IRC.
     """
-    indices = _neb_intermediate_image_indices(neb_output)
+    indices = sorted(set(candidate_indices or _neb_intermediate_image_indices(neb_output)))
     if not indices:
         return {"status": "not_detected", "image_indices": [], "candidates": []}
     expected_elements, _, _ = read_xyz(path_dir / "reactant.xyz")
@@ -184,6 +213,7 @@ def _validate_neb_intermediates(
         "schema_version": 1,
         "kind": "orca_neb_intermediate_evidence",
         "status": "validated_intermediate_detected" if validated else "intermediate_detected_unvalidated",
+        "detection_source": detection_source,
         "image_indices": indices,
         "candidates": candidates,
         "validated_candidate_count": len(validated),
@@ -321,6 +351,7 @@ def _run_or_resume(input_path: Path, *, timeout_seconds: float | None) -> dict:
     contract = json.loads(contract_path.read_text()) if contract_path.is_file() else {}
     no_barrier_outcome = _orca_neb_no_barrier_outcome(output)
     existing_intermediates = _neb_intermediate_image_indices(output)
+    existing_angle_warning = _neb_angle_warning_image_indices(output)
     if contract.get("sha256") == digest.hexdigest():
         if _normal_orca_output(output):
             return {"status": "completed", "resumed": True, "input": str(input_path), "output": str(output)}
@@ -336,6 +367,15 @@ def _run_or_resume(input_path: Path, *, timeout_seconds: float | None) -> dict:
                 "input": str(input_path), "output": str(output),
                 "intermediate_image_indices": existing_intermediates,
             }
+        if existing_angle_warning:
+            return {
+                "status": "completed_path_quality_warning", "resumed": True,
+                "input": str(input_path), "output": str(output),
+                "path_quality_warning": {
+                    "kind": "maximum_angle_between_images",
+                    "image_indices": existing_angle_warning,
+                },
+            }
 
     is_neb = "NEB-TS" in input_text.upper()
 
@@ -343,7 +383,10 @@ def _run_or_resume(input_path: Path, *, timeout_seconds: float | None) -> dict:
         # Preserve ORCA's native output verbatim while allowing a NEB warning
         # to interrupt the expensive single-band calculation immediately.
         print(line, end="", flush=True)
-        return bool(is_neb and _NEB_INTERMEDIATE_WARNING.search(line))
+        return bool(is_neb and (
+            _NEB_INTERMEDIATE_WARNING.search(line)
+            or _NEB_ANGLE_WARNING.search(line)
+        ))
 
     try:
         artifacts = run_orca(
@@ -355,14 +398,20 @@ def _run_or_resume(input_path: Path, *, timeout_seconds: float | None) -> dict:
     except RuntimeError:
         no_barrier_outcome = _orca_neb_no_barrier_outcome(output)
         existing_intermediates = _neb_intermediate_image_indices(output)
-        if not no_barrier_outcome["valid"] and not existing_intermediates:
+        existing_angle_warning = _neb_angle_warning_image_indices(output)
+        if not no_barrier_outcome["valid"] and not existing_intermediates and not existing_angle_warning:
             raise
-        artifacts = {"out": output}
+        artifacts = {
+            "out": output,
+            "stopped_early": bool(existing_intermediates or existing_angle_warning),
+        }
     normal_termination = _normal_orca_output(Path(artifacts["out"]))
     no_barrier_outcome = _orca_neb_no_barrier_outcome(Path(artifacts["out"]))
     intermediate_indices = _neb_intermediate_image_indices(Path(artifacts["out"]))
+    angle_warning_indices = _neb_angle_warning_image_indices(Path(artifacts["out"]))
     interrupted_for_intermediate = bool(artifacts.get("stopped_early")) and bool(intermediate_indices)
-    if not normal_termination and not no_barrier_outcome["valid"] and not interrupted_for_intermediate:
+    interrupted_for_angle = bool(artifacts.get("stopped_early")) and bool(angle_warning_indices)
+    if not normal_termination and not no_barrier_outcome["valid"] and not interrupted_for_intermediate and not interrupted_for_angle:
         raise RuntimeError(f"ORCA returned without its normal-termination marker: {artifacts['out']}")
     _write_json(contract_path, {
         "schema_version": 1,
@@ -373,6 +422,7 @@ def _run_or_resume(input_path: Path, *, timeout_seconds: float | None) -> dict:
     })
     status = (
         "completed_intermediate_detected" if interrupted_for_intermediate else
+        "completed_path_quality_warning" if interrupted_for_angle else
         "completed" if normal_termination else "completed_no_interior_barrier"
     )
     result = {
@@ -383,11 +433,22 @@ def _run_or_resume(input_path: Path, *, timeout_seconds: float | None) -> dict:
         result["orca_neb_outcome"] = no_barrier_outcome
     if intermediate_indices:
         result["intermediate_image_indices"] = intermediate_indices
+    if angle_warning_indices:
+        result["path_quality_warning"] = {
+            "kind": "maximum_angle_between_images",
+            "image_indices": angle_warning_indices,
+        }
     if interrupted_for_intermediate:
         result["early_stop"] = {
             "status": "stopped_after_orca_intermediate_warning",
             "reason": "ORCA reported an intermediate minimum during the live NEB stream",
             "image_indices": intermediate_indices,
+        }
+    elif interrupted_for_angle:
+        result["early_stop"] = {
+            "status": "stopped_after_neb_path_quality_warning",
+            "reason": "ORCA reported a maximum-angle path cusp during the live NEB stream",
+            "image_indices": angle_warning_indices,
         }
     return result
 
@@ -1077,10 +1138,25 @@ def _run_generic_orientation(
         semantic_no_barrier = neb_execution["status"] == "completed_no_interior_barrier"
         ts_xyz = _locate_neb_ts(path_dir, neb_input.stem) if neb_execution["status"] == "completed" else None
         if ts_xyz is None:
+            path_quality_warning = neb_execution.get("path_quality_warning") or {}
+            angle_candidates = list(path_quality_warning.get("image_indices") or [])
+            explicit_candidates = _neb_intermediate_image_indices(Path(neb_execution["output"]))
+            # For a cusp warning the latter image is the turning-point side
+            # of the reported pair.  It is only a candidate until it passes
+            # the same optimization/frequency gate as an explicit ORCA
+            # intermediate.
+            candidate_indices = (
+                None if explicit_candidates else ([max(angle_candidates)] if angle_candidates else None)
+            )
             intermediate_evidence = _validate_neb_intermediates(
                 route, neb_output=Path(neb_execution["output"]), path_dir=path_dir,
                 ncores=ncores, method_keywords=method_keywords,
                 timeout_seconds=timeout_seconds,
+                candidate_indices=candidate_indices,
+                detection_source=(
+                    "maximum_angle_path_cusp_warning" if candidate_indices
+                    else "explicit_intermediate_warning"
+                ),
             )
             if intermediate_evidence.get("status") == "validated_intermediate_detected":
                 intermediate_evidence["segmented_verification"] = _run_segmented_intermediate_nebs(
@@ -1111,6 +1187,10 @@ def _run_generic_orientation(
                     trajectory=None,
                 )
                 return record
+            if intermediate_evidence.get("status") != "not_detected":
+                record["intermediate_evidence"] = intermediate_evidence
+            if path_quality_warning:
+                record["path_quality_warning"] = path_quality_warning
             trajectory = _locate_neb_trajectory(path_dir, neb_input.stem)
             energies = _trajectory_energies(trajectory) if trajectory else None
             frame_count = len(xyz_frames(trajectory)) if trajectory else 0

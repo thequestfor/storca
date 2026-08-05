@@ -8,6 +8,7 @@ from unittest.mock import patch
 import numpy as np
 
 from storca.reaction_path import (
+    _neb_angle_warning_image_indices,
     _neb_intermediate_image_indices,
     _orca_neb_no_barrier_outcome,
     _run_generic_orientation,
@@ -35,6 +36,15 @@ class GenericReactionPathTests(unittest.TestCase):
                 "Possible intermediate minimum found at image(s): 4 7\n"
             )
             self.assertEqual(_neb_intermediate_image_indices(output), [1, 4, 7])
+
+    def test_orca_angle_warning_ignores_corrupt_first_integer(self):
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "neb-ts.out"
+            output.write_text(
+                "Warning: maximum angle between images (-1659107148 - 5 - 6): 0.00\n"
+                "Warning: maximum angle between images (745032783 - 5 - 6): 0.00\n"
+            )
+            self.assertEqual(_neb_angle_warning_image_indices(output), [5, 6])
 
     @patch("storca.reaction_path.run_orca")
     def test_neb_intermediate_warning_stops_and_is_retained(self, run_orca):
