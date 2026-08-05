@@ -109,6 +109,12 @@ def _orca_neb_no_barrier_outcome(path: Path) -> dict:
     }
 
 
+_NEB_INTERMEDIATE_WARNING = re.compile(
+    r"Possible\s+intermediate\s+minimum\s+found\s+at\s+image\(s\):",
+    re.IGNORECASE,
+)
+
+
 def _neb_intermediate_image_indices(output: Path) -> list[int]:
     """Read ORCA's retained intermediate-image diagnostic without guessing chemistry."""
     output = Path(output)
@@ -201,6 +207,99 @@ def _validate_neb_intermediates(
     }
 
 
+def _run_segmented_intermediate_nebs(
+    route: RouteSpec,
+    *,
+    reactant_xyz: Path,
+    product_xyz: Path,
+    intermediate_evidence: dict,
+    path_dir: Path,
+    separated_fragments: bool,
+    ncores: int,
+    method_keywords: list[str] | None,
+    timeout_seconds: float | None,
+    neb_images: int,
+) -> dict:
+    """Immediately launch smaller NEBs after ORCA flags an intermediate.
+
+    These calculations are path evidence only.  Their endpoint/TS/IRC/rate
+    validation remains a separate gate, so a segmented NEB can never by
+    itself create an instability or lifetime claim.
+    """
+    candidates = [
+        item for item in intermediate_evidence.get("candidates", [])
+        if item.get("status") == "validated_intermediate_minimum"
+        and item.get("optimized_xyz")
+    ]
+    if not candidates:
+        return {
+            "status": "not_prepared",
+            "segments": [],
+            "reason": "no_validated_intermediate_geometry",
+        }
+    segment_records: list[dict] = []
+    # A shorter band is sufficient for each local segment and avoids repeating
+    # the full expensive parent path resolution.
+    segment_image_count = max(3, min(int(neb_images), 6))
+    for intermediate in candidates:
+        intermediate_xyz = Path(intermediate["optimized_xyz"])
+        endpoints = [
+            ("reactants-to-intermediate", Path(reactant_xyz), intermediate_xyz),
+            ("intermediate-to-products", intermediate_xyz, Path(product_xyz)),
+        ]
+        for label, source, target in endpoints:
+            segment_dir = path_dir / "segments" / label
+            segment_dir.mkdir(parents=True, exist_ok=True)
+            segment_reactant = segment_dir / "reactant.xyz"
+            segment_product = segment_dir / "product.xyz"
+            shutil.copy2(source, segment_reactant)
+            shutil.copy2(target, segment_product)
+            neb_input = create_orca_neb_ts_input(
+                segment_reactant, segment_product,
+                charge=route.charge, multiplicity=route.multiplicity,
+                label="neb-ts", ncores=ncores, nimages=segment_image_count,
+                method_keywords=method_keywords,
+                preopt_ends=not separated_fragments,
+            )
+            try:
+                execution = _run_or_resume(neb_input, timeout_seconds=timeout_seconds)
+                trajectory = _locate_neb_trajectory(segment_dir, neb_input.stem)
+                ts = _locate_neb_ts(segment_dir, neb_input.stem)
+                segment_records.append({
+                    "label": label,
+                    "status": "computed",
+                    "input": str(neb_input),
+                    "output": execution.get("output"),
+                    "execution": execution,
+                    "trajectory": str(trajectory) if trajectory else None,
+                    "ts_candidate": str(ts) if ts else None,
+                    "rate_claim_allowed": False,
+                })
+            except Exception as error:
+                segment_records.append({
+                    "label": label,
+                    "status": "failed",
+                    "input": str(neb_input),
+                    "failure_reason": f"{type(error).__name__}: {error}",
+                    "rate_claim_allowed": False,
+                })
+    completed = sum(item.get("status") == "computed" for item in segment_records)
+    return {
+        "status": "computed" if completed == len(segment_records) else "incomplete",
+        "segment_count": len(segment_records),
+        "completed_segment_count": completed,
+        "image_count_per_segment": segment_image_count,
+        "segments": segment_records,
+        "rate_claim_allowed": False,
+        "requirements": [
+            "validate each segment endpoint connectivity",
+            "optimize each segment TS and require one relevant imaginary frequency",
+            "run IRC or endpoint-connection validation for each segment",
+            "derive the overall rate from the validated elementary sequence",
+        ],
+    }
+
+
 def _run_or_resume(input_path: Path, *, timeout_seconds: float | None) -> dict:
     input_path = Path(input_path)
     output = Path(input_path).with_suffix(".out")
@@ -221,6 +320,7 @@ def _run_or_resume(input_path: Path, *, timeout_seconds: float | None) -> dict:
     contract_path = input_path.with_suffix(".contract.json")
     contract = json.loads(contract_path.read_text()) if contract_path.is_file() else {}
     no_barrier_outcome = _orca_neb_no_barrier_outcome(output)
+    existing_intermediates = _neb_intermediate_image_indices(output)
     if contract.get("sha256") == digest.hexdigest():
         if _normal_orca_output(output):
             return {"status": "completed", "resumed": True, "input": str(input_path), "output": str(output)}
@@ -230,16 +330,39 @@ def _run_or_resume(input_path: Path, *, timeout_seconds: float | None) -> dict:
                 "input": str(input_path), "output": str(output),
                 "orca_neb_outcome": no_barrier_outcome,
             }
+        if existing_intermediates:
+            return {
+                "status": "completed_intermediate_detected", "resumed": True,
+                "input": str(input_path), "output": str(output),
+                "intermediate_image_indices": existing_intermediates,
+            }
+
+    is_neb = "NEB-TS" in input_text.upper()
+
+    def _stream(line: str) -> bool | None:
+        # Preserve ORCA's native output verbatim while allowing a NEB warning
+        # to interrupt the expensive single-band calculation immediately.
+        print(line, end="", flush=True)
+        return bool(is_neb and _NEB_INTERMEDIATE_WARNING.search(line))
+
     try:
-        artifacts = run_orca(input_path, timeout_seconds=timeout_seconds)
+        artifacts = run_orca(
+            input_path,
+            timeout_seconds=timeout_seconds,
+            stream_output=_stream,
+            live_output=False,
+        )
     except RuntimeError:
         no_barrier_outcome = _orca_neb_no_barrier_outcome(output)
-        if not no_barrier_outcome["valid"]:
+        existing_intermediates = _neb_intermediate_image_indices(output)
+        if not no_barrier_outcome["valid"] and not existing_intermediates:
             raise
         artifacts = {"out": output}
     normal_termination = _normal_orca_output(Path(artifacts["out"]))
     no_barrier_outcome = _orca_neb_no_barrier_outcome(Path(artifacts["out"]))
-    if not normal_termination and not no_barrier_outcome["valid"]:
+    intermediate_indices = _neb_intermediate_image_indices(Path(artifacts["out"]))
+    interrupted_for_intermediate = bool(artifacts.get("stopped_early")) and bool(intermediate_indices)
+    if not normal_termination and not no_barrier_outcome["valid"] and not interrupted_for_intermediate:
         raise RuntimeError(f"ORCA returned without its normal-termination marker: {artifacts['out']}")
     _write_json(contract_path, {
         "schema_version": 1,
@@ -248,13 +371,24 @@ def _run_or_resume(input_path: Path, *, timeout_seconds: float | None) -> dict:
         "input": str(input_path),
         "referenced_files": referenced,
     })
-    status = "completed" if normal_termination else "completed_no_interior_barrier"
+    status = (
+        "completed_intermediate_detected" if interrupted_for_intermediate else
+        "completed" if normal_termination else "completed_no_interior_barrier"
+    )
     result = {
         "status": status, "resumed": False,
         "input": str(input_path), "output": str(artifacts["out"]),
     }
     if no_barrier_outcome["valid"]:
         result["orca_neb_outcome"] = no_barrier_outcome
+    if intermediate_indices:
+        result["intermediate_image_indices"] = intermediate_indices
+    if interrupted_for_intermediate:
+        result["early_stop"] = {
+            "status": "stopped_after_orca_intermediate_warning",
+            "reason": "ORCA reported an intermediate minimum during the live NEB stream",
+            "image_indices": intermediate_indices,
+        }
     return result
 
 
@@ -949,6 +1083,18 @@ def _run_generic_orientation(
                 timeout_seconds=timeout_seconds,
             )
             if intermediate_evidence.get("status") == "validated_intermediate_detected":
+                intermediate_evidence["segmented_verification"] = _run_segmented_intermediate_nebs(
+                    route,
+                    reactant_xyz=reactant_xyz,
+                    product_xyz=product_xyz,
+                    intermediate_evidence=intermediate_evidence,
+                    path_dir=path_dir,
+                    separated_fragments=separated_fragments,
+                    ncores=ncores,
+                    method_keywords=method_keywords,
+                    timeout_seconds=timeout_seconds,
+                    neb_images=neb_images,
+                )
                 record.update(
                     status="intermediate_detected_requires_segmented_verification",
                     path_classification="multistep_intermediate_detected",

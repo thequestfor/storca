@@ -37,7 +37,7 @@ def validate_orca_output(out_file: Path) -> dict:
 def run_orca(
     inp_file: Path,
     capture_out: bool = True,
-    stream_output: Callable[[str], None] | None = None,
+    stream_output: Callable[[str], bool | None] | None = None,
     stdout_file: Path | None = None,
     extra_env: dict[str, str] | None = None,
     timeout_seconds: float | None = None,
@@ -50,7 +50,8 @@ def run_orca(
         inp_file: ORCA/GOAT input file
         capture_out: write a .out file (default True)
         stream_output: optional callable(line) for real-time output monitoring.
-            A supplied callback takes precedence over ``live_output``.
+            Returning true requests a graceful early stop after that line.  A
+            supplied callback takes precedence over ``live_output``.
         stdout_file: optional path to write stdout (default is inp_file.with_suffix('.out'))
         extra_env: environment variables required by this specific calculation
         live_output: mirror ORCA's native ``.out`` stream to this process's
@@ -118,6 +119,7 @@ def run_orca(
                 bufsize=1,
                 cwd=inp_file.parent,
                 env=runtime_env,
+                start_new_session=True,
             )
 
             assert proc.stdout is not None
@@ -134,24 +136,53 @@ def run_orca(
             reader.start()
             deadline = time.monotonic() + timeout_seconds if timeout_seconds is not None else None
             ended = False
+            stopped_early = False
+
+            def _stop_process_group() -> None:
+                """Stop ORCA and all image workers without orphaning children."""
+                try:
+                    process_group = os.getpgid(proc.pid)
+                    os.killpg(process_group, signal.SIGINT)
+                except (ProcessLookupError, PermissionError):
+                    pass
+                try:
+                    proc.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                    except (ProcessLookupError, PermissionError):
+                        pass
+                    proc.wait()
+
             while not ended:
+                if deadline is not None and time.monotonic() > deadline:
+                    _stop_process_group()
+                    raise subprocess.TimeoutExpired([ORCA_CMD, inp_file.name], timeout_seconds)
                 try:
                     line = lines.get(timeout=0.2)
                 except queue.Empty:
-                    if deadline is not None and time.monotonic() > deadline:
-                        proc.kill()
-                        proc.wait()
-                        raise subprocess.TimeoutExpired([ORCA_CMD, inp_file.name], timeout_seconds)
                     continue
                 if line is None:
                     ended = True
                     continue
                 f.write(line)
                 f.flush()
-                stream_output(line)
-            proc.wait()
-            if proc.returncode != 0:
+                if stream_output(line):
+                    stopped_early = True
+                    _stop_process_group()
+                    ended = True
+            if not stopped_early:
+                proc.wait()
+            reader.join(timeout=5)
+            if proc.returncode != 0 and not stopped_early:
                 raise RuntimeError(f"ORCA failed: check {out_file}")
+        if stopped_early:
+            return {
+                "gbw": inp_file.with_suffix(".gbw"),
+                "xyz": inp_file.with_suffix(".xyz"),
+                "out": out_file,
+                "stopped_early": True,
+            }
         if not validate_orca_output(out_file)["normal_termination"]:
             raise RuntimeError(f"ORCA exited without normal-termination marker: check {out_file}")
 

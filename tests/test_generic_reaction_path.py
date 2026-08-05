@@ -36,6 +36,33 @@ class GenericReactionPathTests(unittest.TestCase):
             )
             self.assertEqual(_neb_intermediate_image_indices(output), [1, 4, 7])
 
+    @patch("storca.reaction_path.run_orca")
+    def test_neb_intermediate_warning_stops_and_is_retained(self, run_orca):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            inp = folder / "neb-ts.inp"
+            inp.write_text(
+                "! B3LYP def2-SVP NEB-TS\n"
+                '%neb\n  Product "product.xyz"\nend\n'
+                "* xyzfile 0 1 reactant.xyz\n"
+            )
+            (folder / "reactant.xyz").write_text("1\nreactant\nH 0 0 0\n")
+            (folder / "product.xyz").write_text("1\nproduct\nH 0 0 1\n")
+            output = inp.with_suffix(".out")
+
+            def stopped(input_path, **kwargs):
+                output.write_text(
+                    "Possible intermediate minimum found at image(s): 2\n"
+                )
+                self.assertFalse(kwargs["live_output"])
+                return {"out": output, "stopped_early": True}
+
+            run_orca.side_effect = stopped
+            result = _run_or_resume(inp, timeout_seconds=10.0)
+            self.assertEqual(result["status"], "completed_intermediate_detected")
+            self.assertEqual(result["intermediate_image_indices"], [2])
+            self.assertEqual(result["early_stop"]["status"], "stopped_after_orca_intermediate_warning")
+
     @staticmethod
     def _association_route() -> RouteSpec:
         return RouteSpec(
