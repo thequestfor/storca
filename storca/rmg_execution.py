@@ -22,15 +22,27 @@ def assess_rmg_execution(log_file: Path, execution: dict | None = None) -> dict:
         "termination_reason": "missing_rmg_log",
         "evidence": [],
     }
-    if not result["wrapper_returned_success"]:
-        result.update(status="incomplete", termination_reason="rmg_process_failed")
-        return result
     if not result["log_present"]:
+        if not result["wrapper_returned_success"]:
+            result.update(status="incomplete", termination_reason="rmg_process_failed")
         return result
     text = Path(log_file).read_text(errors="replace")
     lowered = text.lower()
     resurrections = lowered.count("resurrecting model")
     initial_step_failures = lowered.count("daspk returned with an idid")
+    if initial_step_failures and (
+        "idid = -6" in lowered
+        or "invalid_objects could not be filled during resurrection process" in lowered
+        or "model resurrection has failed" in lowered
+    ):
+        result.update(
+            status="incomplete", termination_reason="daspk_initial_step_singularity",
+            evidence=[
+                f"resurrections={resurrections}",
+                f"daspk_initial_step_failures={initial_step_failures}",
+            ],
+        )
+        return result
     # RMG may recover once from a stiff start. Repeated recovery means the
     # reactor is not providing a numerically trustworthy bounded-network
     # result, even if the outer process later exits normally.
@@ -39,6 +51,9 @@ def assess_rmg_execution(log_file: Path, execution: dict | None = None) -> dict:
             status="incomplete", termination_reason="repeated_solver_resurrection",
             evidence=[f"resurrections={resurrections}", f"daspk_initial_step_failures={initial_step_failures}"],
         )
+        return result
+    if not result["wrapper_returned_success"]:
+        result.update(status="incomplete", termination_reason="rmg_process_failed")
         return result
     # ``Reached max number of objects`` and the following simulator interrupt
     # are normal RMG enlargement control flow when maxNumObjsPerIter is hit.

@@ -301,6 +301,7 @@ def create_rmg_input(
     additional_species: list[dict] | None = None,
     initial_mole_fractions: dict[str, float] | None = None,
     reaction_libraries: list[Path] | None = None,
+    database_reaction_libraries: list[str] | None = None,
     cap_generated_carbon_at_target: bool = True,
     maximum_heavy_atoms: int | None = None,
     maximum_radical_electrons: int | None = None,
@@ -324,6 +325,10 @@ def create_rmg_input(
             ``smiles``, and optional ``reactive`` keys.
         initial_mole_fractions: Explicit reactor composition. Defaults to the
             target species at mole fraction one.
+        reaction_libraries: Validated local STORCA-generated library paths.
+        database_reaction_libraries: Named libraries shipped with the selected
+            RMG database. Local calculated libraries are listed first so an
+            ORCA/Arkane repair can replace a reference-library rate.
 
     Returns:
         Path to input.py
@@ -332,6 +337,10 @@ def create_rmg_input(
     input_file = workdir / "input.py"
     additional_species = [dict(species) for species in (additional_species or [])]
     reaction_libraries = reaction_libraries or []
+    database_reaction_libraries = list(database_reaction_libraries or [])
+    if any(not str(name).strip() for name in database_reaction_libraries):
+        raise ValueError("RMG database reaction-library names must be nonempty")
+    database_reaction_libraries = list(dict.fromkeys(str(name).strip() for name in database_reaction_libraries))
     for library in reaction_libraries:
         library = Path(library)
         if not (library / "reactions.py").is_file() or not (library / "dictionary.txt").is_file():
@@ -426,9 +435,14 @@ def create_rmg_input(
         if maximum_radical_electrons is not None else ""
     )
 
+    library_entries = [
+        *(str(Path(library).resolve()) for library in reaction_libraries),
+        *database_reaction_libraries,
+    ]
+
     content = f"""database(
     thermoLibraries=['primaryThermoLibrary'],
-    reactionLibraries={[str(Path(library).resolve()) for library in reaction_libraries]!r},
+    reactionLibraries={library_entries!r},
     seedMechanisms=[],
     kineticsDepositories=['training'],
     kineticsFamilies='default',

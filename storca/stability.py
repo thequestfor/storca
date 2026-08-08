@@ -10,7 +10,7 @@ from copy import deepcopy
 
 from src.inputgen import create_rmg_input
 from src.orca_runner import run_rmg_supervised
-from src.parser import parse_chemkin_annotated
+from src.parser import classify_chemkin_route, parse_chemkin_annotated
 
 from .conditions import ConditionSpec, build_condition_spec
 from .reachability import assess_kinetic_relevance, enrich_candidate_route
@@ -75,7 +75,37 @@ RMG_RESOURCE_TIERS = {
 }
 
 
-def _reaction_space_budget(smiles: str, scenario: dict, *, intrinsic_scope: bool) -> dict:
+def _recommended_rmg_database_libraries(smiles: str) -> list[str]:
+    """Select general RMG reference libraries from elemental composition.
+
+    This is not a structural-alert system.  It exposes curated mechanisms
+    already shipped with RMG when their elemental scope applies; RMG still
+    decides which elementary reactions match the declared species.
+    """
+    try:
+        from rdkit import Chem
+
+        molecule = Chem.MolFromSmiles(smiles)
+        if molecule is None:
+            raise ValueError("invalid target SMILES")
+        elements = {atom.GetAtomicNum() for atom in molecule.GetAtoms()}
+    except Exception:
+        return []
+    libraries: list[str] = []
+    if 7 in elements:
+        libraries.append("Nitrogen_Glarborg_Gimenez_et_al")
+    if 8 in elements and elements <= {1, 8}:
+        libraries.append("primaryH2O2")
+    return libraries
+
+
+def _reaction_space_budget(
+    smiles: str,
+    scenario: dict,
+    *,
+    intrinsic_scope: bool,
+    maximum_heavy_atoms: int | None = None,
+) -> dict:
     """Return a small, explicit RMG generation budget for this condition.
 
     The limit is based only on the supplied target and declared *reactive*
@@ -83,6 +113,8 @@ def _reaction_space_budget(smiles: str, scenario: dict, *, intrinsic_scope: bool
     product (target + O2, target + H2O, or target + target), while preventing
     an open-ended chain of larger oligomers from consuming the screen.
     """
+    if maximum_heavy_atoms is not None and maximum_heavy_atoms < 1:
+        raise ValueError("RMG maximum heavy atoms must be positive")
     try:
         from rdkit import Chem
 
@@ -110,7 +142,11 @@ def _reaction_space_budget(smiles: str, scenario: dict, *, intrinsic_scope: bool
         # A missing cheminformatics dependency must not quietly impose a
         # possibly wrong structural cap.  The retained evidence says so.
         return {
-            "maximum_heavy_atoms": None,
+            "maximum_heavy_atoms": maximum_heavy_atoms,
+            "computed_maximum_heavy_atoms": None,
+            "maximum_heavy_atoms_source": (
+                "user_override" if maximum_heavy_atoms is not None else "unavailable_structure_parse_failure"
+            ),
             "maximum_radical_electrons": None,
             "filter_reactions": True,
             "scope": "unbounded_due_to_structure_parse_failure",
@@ -118,16 +154,21 @@ def _reaction_space_budget(smiles: str, scenario: dict, *, intrinsic_scope: bool
         }
 
     # A target-target collision is still physically possible at the stated
-    # concentration.  In reactive conditions, retain whichever direct
-    # collision creates the larger one-step species.
-    maximum_heavy = target_heavy if intrinsic_scope else target_heavy + max(target_heavy, partner_heavy)
+    # concentration.  Every condition therefore admits the products of one
+    # target-target event, while reactive conditions also admit one declared
+    # target-partner event.  The previous intrinsic cap of ``target_heavy``
+    # contradicted this policy and rejected products such as N2O from 2 HNO.
+    computed_maximum_heavy = target_heavy + max(target_heavy, partner_heavy)
+    maximum_heavy = int(maximum_heavy_atoms) if maximum_heavy_atoms is not None else computed_maximum_heavy
     maximum_radicals = max(2, target_radicals + partner_radicals)
     return {
         "maximum_heavy_atoms": maximum_heavy,
+        "computed_maximum_heavy_atoms": computed_maximum_heavy,
+        "maximum_heavy_atoms_source": "user_override" if maximum_heavy_atoms is not None else "one_collision_budget",
         "maximum_radical_electrons": maximum_radicals,
         "filter_reactions": True,
         "scope": (
-            "direct_intrinsic_target_decomposition" if intrinsic_scope
+            "one_collision_intrinsic_network" if intrinsic_scope
             else "one_declared_collision_product_network"
         ),
         "target_heavy_atoms": target_heavy,
@@ -322,6 +363,7 @@ def _collect_rmg_evidence_once(
     rmg_max_iterations: int | None = 100,
     rmg_max_edge_species: int = 250,
     rmg_max_objects_per_iteration: int = 1,
+    rmg_maximum_heavy_atoms: int | None = None,
     restart_from_seed: Path | None = None,
     rmg_hard_timeout_seconds: float | None = None,
     rmg_heartbeat_timeout_seconds: float | None = None,
@@ -330,6 +372,7 @@ def _collect_rmg_evidence_once(
     scenario: dict | None = None,
     conditions: ConditionSpec | None = None,
     reaction_libraries: list[Path] | None = None,
+    database_reaction_libraries: list[str] | None = None,
 ) -> dict:
     """Run a bounded RMG screen and return evidence without a stability verdict."""
     if barrier_threshold <= 0:
@@ -345,11 +388,33 @@ def _collect_rmg_evidence_once(
     ))
     reaction_space_budget = _reaction_space_budget(
         smiles, scenario or {}, intrinsic_scope=intrinsic_scope,
+        maximum_heavy_atoms=rmg_maximum_heavy_atoms,
     )
     from .generated_kinetics import validate_generated_library
     reaction_libraries = reaction_libraries or []
+    database_reaction_libraries = list(dict.fromkeys(database_reaction_libraries or []))
     library_manifests = [validate_generated_library(path, temperature_K=temperature, pressure_bar=pressure)
                          for path in reaction_libraries]
+    reference_manifest = None
+    reference_subset_libraries: list[str] = []
+    if database_reaction_libraries:
+        from .reference_kinetics import build_rmg_reference_subset
+
+        declared_reactive_smiles = [
+            species["smiles"]
+            for species in (scenario or {}).get("additional_species", [])
+            if species.get("reactive", True)
+        ]
+        reference_manifest = build_rmg_reference_subset(
+            smiles,
+            declared_reactive_smiles,
+            database_reaction_libraries,
+            rmg_dir / "reference-kinetics",
+            rmg_env=rmg_env,
+        )
+        if reference_manifest["selected_reaction_count"]:
+            reference_path = Path(reference_manifest["library"])
+            reference_subset_libraries.append(str(reference_path))
     input_file = create_rmg_input(
         "stability", smiles, rmg_dir, temperature=temperature, pressure=pressure,
         max_edge_species=rmg_max_edge_species,
@@ -357,6 +422,7 @@ def _collect_rmg_evidence_once(
         additional_species=(scenario or {}).get("additional_species"),
         initial_mole_fractions=(scenario or {}).get("initial_mole_fractions"),
         reaction_libraries=reaction_libraries,
+        database_reaction_libraries=reference_subset_libraries,
         # Association is retained up to the explicit one-collision budget.
         cap_generated_carbon_at_target=False,
         maximum_heavy_atoms=reaction_space_budget["maximum_heavy_atoms"],
@@ -397,6 +463,10 @@ def _collect_rmg_evidence_once(
         ),
         "candidate_routes": [], "artifacts": artifacts,
         "generated_kinetics_libraries": library_manifests,
+        "reference_kinetics_libraries": {
+            "requested_source_libraries": database_reaction_libraries,
+            "direct_subset": reference_manifest,
+        },
         "interpretation": "RMG is a bounded homogeneous simple-reactor model screen. Missing routes do not establish persistence.",
     }
     try:
@@ -436,6 +506,25 @@ def _collect_rmg_evidence_once(
             {**route, "screening_threshold_kcal_mol": barrier_threshold}
             for route in parsed["candidate_routes"]
         ]
+        # A small reference subset is deliberately not forced into RMG's
+        # kinetic core. Retain its direct, atom-resolved directions as
+        # candidates for ORCA verification even when the bounded solver does
+        # not promote them before its resource limit.
+        for selected in (reference_manifest or {}).get("selected_reactions", []):
+            for direction in selected.get("candidate_directions", []):
+                equation = direction["reaction_equation"]
+                raw_routes.append({
+                    "reaction": selected["label"],
+                    "reaction_equation": equation,
+                    "printed_reaction_equation": selected["label"],
+                    "activation_energy_kcal_mol": None,
+                    "direction": "direct_reference_library_candidate",
+                    "kinetics_representation": "reference_rate_requires_orca_verification",
+                    "source_library": selected["source_library"],
+                    "reference_species": [*direction["reactants"], *direction["products"]],
+                    "screening_threshold_kcal_mol": barrier_threshold,
+                    **classify_chemkin_route(equation, label="stability"),
+                })
         dictionary_file = Path(artifacts["species_dictionary"])
         species_dictionary = parse_species_dictionary(dictionary_file) if dictionary_file.is_file() else {}
         if rmg_env:
@@ -673,6 +762,7 @@ def run_stability_screen(
     rmg_max_iterations: int | None = None,
     rmg_max_edge_species: int | None = None,
     rmg_max_objects_per_iteration: int | None = None,
+    rmg_maximum_heavy_atoms: int | None = None,
     rmg_retry_attempts: int = 2,
     rmg_hard_timeout_seconds: float | None = None,
     rmg_heartbeat_timeout_seconds: float | None = None,
@@ -690,6 +780,8 @@ def run_stability_screen(
     method_profile: dict | None = None,
     precomputed_orca_evidence: dict | None = None,
     reaction_libraries: list[Path] | None = None,
+    database_reaction_libraries: list[str] | None = None,
+    auto_reference_libraries: bool = True,
     auto_verify_routes: bool = True,
     auto_verify_collision_routes: bool | None = None,
     verification_max_iterations: int = 12,
@@ -734,6 +826,13 @@ def run_stability_screen(
         relative_humidity=scenario_config.get("relative_humidity"),
     )
     condition_contract = conditions.as_dict()
+    selected_database_libraries = list(database_reaction_libraries or [])
+    if auto_reference_libraries:
+        selected_database_libraries = [
+            *_recommended_rmg_database_libraries(smiles),
+            *selected_database_libraries,
+        ]
+    selected_database_libraries = list(dict.fromkeys(selected_database_libraries))
     write_metadata(
         run_dir,
         workflow="orca_rmg_stability_screen",
@@ -746,6 +845,9 @@ def run_stability_screen(
         stability_scenario=scenario_config,
         condition_contract=condition_contract,
         rmg_resource_tier=resource_config,
+        rmg_maximum_heavy_atoms=rmg_maximum_heavy_atoms,
+        rmg_database_reaction_libraries=selected_database_libraries,
+        rmg_reference_library_policy=("automatic_by_elemental_scope" if auto_reference_libraries else "explicit_only"),
         charge=charge,
         multiplicity=multiplicity,
         ncores=ncores,
@@ -772,7 +874,9 @@ def run_stability_screen(
                                rmg_walltime=resource_config["walltime"], rmg_max_processes=resource_config["max_processes"],
                                rmg_max_iterations=resource_config["max_iterations"], rmg_max_edge_species=resource_config["max_edge_species"],
                                rmg_max_objects_per_iteration=resource_config["max_objects_per_iteration"],
+                               rmg_maximum_heavy_atoms=rmg_maximum_heavy_atoms,
                                scenario=scenario_config, conditions=conditions, reaction_libraries=reaction_libraries,
+                               database_reaction_libraries=selected_database_libraries,
                                rmg_retry_attempts=rmg_retry_attempts,
                                rmg_hard_timeout_seconds=rmg_hard_timeout_seconds,
                                rmg_heartbeat_timeout_seconds=rmg_heartbeat_timeout_seconds,
@@ -941,9 +1045,11 @@ def run_stability_screen(
                     rmg_max_iterations=resource_config["max_iterations"],
                     rmg_max_edge_species=resource_config["max_edge_species"],
                     rmg_max_objects_per_iteration=resource_config["max_objects_per_iteration"],
+                    rmg_maximum_heavy_atoms=rmg_maximum_heavy_atoms,
                     scenario=scenario_config,
                     conditions=conditions,
                     reaction_libraries=libraries,
+                    database_reaction_libraries=selected_database_libraries,
                     rmg_retry_attempts=rmg_retry_attempts,
                     rmg_hard_timeout_seconds=rmg_hard_timeout_seconds,
                     rmg_heartbeat_timeout_seconds=rmg_heartbeat_timeout_seconds,
@@ -1081,6 +1187,11 @@ def _resolve_rmg_route_endpoints(route: dict, mechanism_inspection: dict | None,
         for name in (record.get("label"), record.get("chemkin_identifier")):
             if name:
                 by_name[str(name)] = record
+    for record in route.get("reference_species", []):
+        by_name[str(record["label"])] = {
+            **record,
+            "net_charge": record.get("charge"),
+        }
     arrow = "<=>" if "<=>" in equation else ("=>" if "=>" in equation else None)
     if not arrow:
         resolved["orca_verification"] = {"status": "unresolved_endpoints", "reason": "RMG reaction equation could not be parsed."}

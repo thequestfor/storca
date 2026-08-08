@@ -470,6 +470,23 @@ class VerificationEngine:
     def run(self) -> dict:
         self._persist_state("started")
         try:
+            return self._run_started()
+        except BaseException as error:
+            # Normal fail-closed returns persist their own terminal summary.
+            # This guard covers an exception or user interrupt which escapes
+            # the chemistry callbacks, preventing a dead process from leaving
+            # an apparently live ``running`` engine state behind.
+            self._persist_state(
+                "failed_closed",
+                terminal_error={
+                    "error_type": type(error).__name__,
+                    "message": str(error),
+                },
+            )
+            raise
+
+    def _run_started(self) -> dict:
+        try:
             current_evidence, _ = _extract_model_result(self.initial_result)
         except Exception as error:
             return self._incomplete("initial_model_evidence_invalid", error=error)

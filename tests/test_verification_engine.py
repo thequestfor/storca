@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from storca.verification_engine import VerificationEngineConfig, run_verification_engine
+from storca.verification_engine import VerificationEngine, VerificationEngineConfig, run_verification_engine
 
 
 CONTRACT = {
@@ -132,6 +132,23 @@ def _bound_propagation(t95, loss=0.20):
 
 
 class VerificationEngineTests(unittest.TestCase):
+    def test_unhandled_interrupt_closes_engine_state(self):
+        with tempfile.TemporaryDirectory() as temp:
+            engine = VerificationEngine(
+                {}, CONTRACT, Path(temp),
+                verify_route=lambda *_: {}, build_rate=lambda *_: {}, rerun_model=lambda *_: {},
+            )
+
+            def interrupt():
+                raise KeyboardInterrupt("test interrupt")
+
+            engine._run_started = interrupt
+            with self.assertRaises(KeyboardInterrupt):
+                engine.run()
+            state = json.loads((engine.session / "engine-state.json").read_text())
+        self.assertEqual(state["status"], "failed_closed")
+        self.assertEqual(state["terminal_error"]["error_type"], "KeyboardInterrupt")
+
     def _callbacks(self, root, *, weights=(1.0, 9.0), envelope_after=None,
                    bad_rate=False, bad_contract=False):
         calls = []

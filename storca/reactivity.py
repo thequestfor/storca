@@ -24,12 +24,13 @@ def frontier_reactivity_summary(orca_output: Path) -> dict:
     gap = float(lumo - homo)
     if gap <= 0:
         raise ValueError("Frontier orbital gap is not positive; cannot form a qualitative closed-shell summary")
-    chemical_potential = -0.5 * (homo + lumo)
+    chemical_potential = 0.5 * (homo + lumo)
+    electronegativity = -chemical_potential
     hardness = 0.5 * gap
     softness = 1.0 / (2.0 * hardness)
     electrophilicity = (chemical_potential**2) / (2.0 * hardness)
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": "qualitative_frontier_orbital_summary",
         "orca_output": str(orca_output),
         "frontier_orbitals": {
@@ -41,6 +42,7 @@ def frontier_reactivity_summary(orca_output: Path) -> dict:
         },
         "derived_frontier_proxies": {
             "chemical_potential_proxy_eV": chemical_potential,
+            "electronegativity_proxy_eV": electronegativity,
             "hardness_proxy_eV": hardness,
             "softness_proxy_eV_inverse": softness,
             "electrophilicity_proxy_eV": electrophilicity,

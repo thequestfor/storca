@@ -27,7 +27,9 @@ from storca.plausibility import attach_rmg_evidence, create_plausibility_dossier
 from storca.spectrum import (boltzmann_weights, build_ir_spectrum, format_spectrum,
                              resume_ir_spectrum, select_goat_conformers, _completed_optimization,
                              _write_ir_artifacts)
-from storca.stability import resolve_stability_configuration, run_stability_screen
+from storca.stability import (_reaction_space_budget, _recommended_rmg_database_libraries,
+                              _resolve_rmg_route_endpoints, resolve_stability_configuration,
+                              run_stability_screen)
 from storca.conditions import build_condition_spec, normalize_target_environment_species
 from storca.reachability import enrich_candidate_route
 from storca.rmg_evidence import parse_final_solver_profile, parse_species_dictionary, time_to_retention_seconds
@@ -315,6 +317,12 @@ class FoundationTests(unittest.TestCase):
         result = frontier_reactivity_summary(FIXTURES / "orca_orbitals.out")
         self.assertAlmostEqual(result["frontier_orbitals"]["gap_eV"], 16.3268)
         self.assertAlmostEqual(result["derived_frontier_proxies"]["hardness_proxy_eV"], 8.1634)
+        self.assertLess(result["derived_frontier_proxies"]["chemical_potential_proxy_eV"], 0.0)
+        self.assertAlmostEqual(
+            result["derived_frontier_proxies"]["electronegativity_proxy_eV"],
+            -result["derived_frontier_proxies"]["chemical_potential_proxy_eV"],
+        )
+        self.assertEqual(result["schema_version"], 2)
         self.assertFalse(result["provenance"]["network_accessed"])
         self.assertIn("does not identify reactive atoms", " ".join(result["limitations"]))
 
@@ -665,6 +673,54 @@ class FoundationTests(unittest.TestCase):
             (library / "dictionary.txt").write_text("# dictionary\n")
             input_file = create_rmg_input("stability", "CCO", folder / "run", reaction_libraries=[library])
             self.assertIn(str(library.resolve()), input_file.read_text())
+
+    def test_rmg_input_loads_named_database_library_after_local_repairs(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            library = folder / "verified"
+            library.mkdir()
+            (library / "reactions.py").write_text("# library\n")
+            (library / "dictionary.txt").write_text("# dictionary\n")
+            input_file = create_rmg_input(
+                "stability", "N=O", folder / "run",
+                reaction_libraries=[library],
+                database_reaction_libraries=["Nitrogen_Glarborg_Gimenez_et_al"],
+            )
+            content = input_file.read_text()
+        self.assertLess(content.index(str(library.resolve())), content.index("Nitrogen_Glarborg_Gimenez_et_al"))
+
+    def test_intrinsic_budget_admits_one_hno_self_collision_and_override(self):
+        budget = _reaction_space_budget("N=O", {}, intrinsic_scope=True)
+        self.assertEqual(budget["target_heavy_atoms"], 2)
+        self.assertEqual(budget["maximum_heavy_atoms"], 4)
+        self.assertEqual(budget["maximum_heavy_atoms_source"], "one_collision_budget")
+        overridden = _reaction_space_budget("N=O", {}, intrinsic_scope=True, maximum_heavy_atoms=7)
+        self.assertEqual(overridden["maximum_heavy_atoms"], 7)
+        self.assertEqual(overridden["maximum_heavy_atoms_source"], "user_override")
+
+    def test_reference_library_selection_is_elemental_not_structural_alerts(self):
+        self.assertEqual(
+            _recommended_rmg_database_libraries("N=O"),
+            ["Nitrogen_Glarborg_Gimenez_et_al"],
+        )
+        self.assertEqual(_recommended_rmg_database_libraries("OO"), ["primaryH2O2"])
+        self.assertEqual(_recommended_rmg_database_libraries("CCO"), [])
+
+    def test_reference_candidate_carries_atom_resolved_endpoints_without_core_promotion(self):
+        route = {
+            "reaction_equation": "2 stability=>N2O+H2O",
+            "direction": "direct_reference_library_candidate",
+            "reference_species": [
+                {"label": "stability", "smiles": "N=O", "charge": 0, "multiplicity": 1},
+                {"label": "N2O", "smiles": "[N-]=[N+]=O", "charge": 0, "multiplicity": 1},
+                {"label": "H2O", "smiles": "O", "charge": 0, "multiplicity": 1},
+            ],
+        }
+        resolved = _resolve_rmg_route_endpoints(route, None, 0)
+        self.assertEqual(resolved["reactant_smiles"], ["N=O", "N=O"])
+        self.assertEqual(resolved["product_smiles"], ["[N-]=[N+]=O", "O"])
+        self.assertEqual(resolved["atom_balance"]["status"], "passed")
+        self.assertEqual(resolved["orca_verification"]["status"], "ready_for_bounded_generic_mapping")
 
     def test_stability_configuration_resolves_named_profiles_and_rejects_unknown_ones(self):
         scenario, tier = resolve_stability_configuration("ambient-air-gas-screen", "review-screen")
@@ -1036,6 +1092,18 @@ class FoundationTests(unittest.TestCase):
             result = assess_rmg_execution(log)
         self.assertEqual(result["status"], "incomplete")
         self.assertEqual(result["termination_reason"], "resource_or_interrupt_termination")
+
+    def test_rmg_execution_identifies_initial_daspk_singularity(self):
+        with tempfile.TemporaryDirectory() as temp:
+            log = Path(temp) / "RMG.log"
+            log.write_text(
+                "Error: Trying to step from time 0.0 to 1e-12 resulted in a solver (DASPK) error: "
+                "DASPK returned with an IDID = -6, A singularity may be present.\n"
+                "Resurrecting Model...\nError: Model Resurrection has failed\n"
+            )
+            result = assess_rmg_execution(log, {"returncode": 1})
+        self.assertEqual(result["status"], "incomplete")
+        self.assertEqual(result["termination_reason"], "daspk_initial_step_singularity")
 
     def test_time_coverage_does_not_extrapolate_a_short_solver_profile(self):
         result = requested_time_coverage({"end_time_seconds": 0.03}, 365 * 24 * 3600)

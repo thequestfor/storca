@@ -76,8 +76,9 @@ For a molecule-level, explicitly qualitative frontier-orbital summary:
 storca reactivity runs/ethanol-.../freq.out --json-output reactivity.json
 ```
 
-It reports HOMO/LUMO gap and Koopmans-like hardness, softness, and
-electrophilicity proxies. It does not provide atom-resolved reactivity, Fukui
+It reports HOMO/LUMO gap and Koopmans-like chemical-potential,
+electronegativity, hardness, softness, and electrophilicity proxies. It does
+not provide atom-resolved reactivity, Fukui
 functions, redox potentials, or safety predictions.
 
 ## IR spectrum prediction
@@ -259,6 +260,18 @@ process avoids the RMG 3.3 macOS worker-database failure observed with multiple
 processes. RMG lives in the separate `rmg_env` Conda environment and is invoked explicitly
 with `--rmg-env rmg_env`; this does not require adding RMG to the active ORCA
 environment. Increase these limits only after reviewing the retained RMG logs.
+
+STORCA automatically consults curated RMG reference libraries by elemental
+scope: the bundled nitrogen mechanism for nitrogen-containing targets and the
+primary H2/O2 mechanism for H/O-only targets. It extracts only direct reactions
+reachable from the declared initial species, preserving a small provenance-rich
+local subset instead of injecting the complete library. Disable this with
+`--no-auto-reference-libraries`, or add another installed database library with
+the repeatable `--rmg-database-library NAME` option. Generated products are
+bounded to one target-target or target-environment collision by default. For a
+controlled comparison, override that cap with
+`--rmg-maximum-heavy-atoms NUMBER`; the selected value and its source are
+retained in the report.
 
 ### Condition ladder
 
