@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 import shutil
+from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -13,6 +14,7 @@ import typer
 
 from .runs import create_run_directory, write_metadata
 from .workflow import run_optimization_and_frequency
+from src.orca_runner import _is_gnome_orca, find_xtb
 
 app = typer.Typer(help="Reproducible ORCA calculation workflows.", no_args_is_help=True)
 
@@ -102,9 +104,18 @@ def run(
 @app.command()
 def doctor() -> None:
     """Report availability of external programs and optional Python packages."""
+    orca = os.environ.get("STORCA_ORCA_BIN") or shutil.which("orca")
+    if orca and _is_gnome_orca(Path(orca)):
+        typer.echo(f"WRONG   ORCA ({orca}; this is GNOME Orca, not quantum-chemistry ORCA)")
+        orca = None
+    else:
+        typer.echo(f"{'OK' if orca else 'MISSING':7} ORCA{f' ({orca})' if orca else ''}")
+    try:
+        xtb = find_xtb()
+    except RuntimeError:
+        xtb = None
     checks = {
-        "ORCA": os.environ.get("STORCA_ORCA_BIN") or shutil.which("orca"),
-        "xTB": shutil.which("xtb"),
+        "xTB": xtb,
         "Open Babel": shutil.which("obabel"),
         "RMG": shutil.which("rmg.py"),
     }
@@ -244,6 +255,7 @@ def spectrum(
     multiplicity: Annotated[int, typer.Option(help="Spin multiplicity.")] = 1,
     cores: Annotated[int, typer.Option(min=1, help="ORCA CPU cores.")] = 1,
     temperature: Annotated[float, typer.Option(min=1.0, help="Boltzmann temperature in K.")] = 298.15,
+    pressure: Annotated[Optional[float], typer.Option(min=0.000001, help="Sample pressure in bar when known.")] = None,
     conformer_engine: Annotated[str, typer.Option(help="Conformer engine: goat (recommended) or rdkit.")] = "goat",
     initial_conformers: Annotated[int, typer.Option(min=1, help="RDKit conformers to generate in fallback mode.")] = 20,
     max_conformers: Annotated[int, typer.Option(min=1, help="Maximum conformers sent to ORCA frequencies.")] = 10,
@@ -251,9 +263,27 @@ def spectrum(
     scale_factor: Annotated[Optional[float], typer.Option(min=0.1, max=1.2, help="Harmonic scale-factor override; otherwise use --method-profile.")] = None,
     method_profile: Annotated[str, typer.Option(help="Named harmonic method/scale-factor profile.")] = "b3lyp-def2-svp",
     fwhm: Annotated[float, typer.Option(min=1.0, help="Gaussian band width (FWHM) in cm^-1.")] = 15.0,
-    spectrum_model: Annotated[str, typer.Option(help="Spectrum model: raw ORCA bands or practical rule-calibrated display.")] = "raw",
+    spectrum_model: Annotated[str, typer.Option(help="Spectrum model: raw, practical, or experimental FTIR.")] = "raw",
     spectrum_style: Annotated[str, typer.Option(help="Display: transmittance, absorbance, or relative.")] = "transmittance",
     max_absorbance: Annotated[float, typer.Option(min=0.01, help="Deepest plotted absorbance for transmittance display.")] = 1.0,
+    phase: Annotated[str, typer.Option(help="Sample phase for experimental model: gas, solution, liquid, or solid.")] = "liquid",
+    measurement: Annotated[str, typer.Option(help="Measurement for experimental model: auto, ATR, transmission, or gas-cell.")] = "auto",
+    solvent: Annotated[Optional[str], typer.Option(help="Solvent identity, or 'neat' for a pure liquid.")] = None,
+    composition: Annotated[Optional[str], typer.Option(help="JSON mapping of component identities to nonnegative fractions.")] = None,
+    concentration: Annotated[Optional[float], typer.Option(min=0.000001, help="Analyte concentration in mol/L when known.")] = None,
+    path_length: Annotated[Optional[float], typer.Option(min=0.000001, help="Transmission or gas-cell path length in mm.")] = None,
+    atr_crystal: Annotated[Optional[str], typer.Option(help="ATR crystal material when known.")] = None,
+    atr_incidence_angle: Annotated[Optional[float], typer.Option(min=0.1, max=89.9, help="ATR incidence angle in degrees.")] = None,
+    sample_refractive_index: Annotated[Optional[float], typer.Option(min=0.000001, help="Sample refractive index for ATR rendering when known.")] = None,
+    instrument_resolution: Annotated[float, typer.Option(min=0.1, help="Nominal FTIR resolution in cm^-1.")] = 4.0,
+    apodization: Annotated[str, typer.Option(help="Instrument line shape: gaussian, triangular, or happ-genzel.")] = "happ-genzel",
+    residual_fwhm: Annotated[Optional[float], typer.Option(min=0.1, help="Residual physical linewidth; defaults by phase.")] = None,
+    fidelity: Annotated[str, typer.Option(help="Experimental fidelity: fast, auto, or balanced.")] = "auto",
+    max_clusters: Annotated[int, typer.Option(min=1, help="Maximum sampled environments sent to ORCA.")] = 7,
+    cluster_energy_window: Annotated[float, typer.Option(min=0.1, help="Deprecated legacy force-field screening setting; retained for CLI compatibility.")] = 5.0,
+    max_orca_jobs: Annotated[int, typer.Option(min=1, help="Hard cap across monomer and cluster frequency jobs.")] = 12,
+    local_mode_orca_invocations: Annotated[int, typer.Option(min=0, help="Additional explicit hard cap for ORCA local-mode gradient process invocations; zero disables fallback execution.")] = 0,
+    dry_run: Annotated[bool, typer.Option(help="Write and print the adaptive calculation plan without running ORCA.")] = False,
 ) -> None:
     """Predict a conformer-weighted IR spectrum from a SMILES string."""
     if multiplicity < 1:
@@ -270,33 +300,224 @@ def spectrum(
         profile = harmonic_method_profile(method_profile)
         resolved_scale_factor, scale_factor_source = resolve_scale_factor(method_profile, scale_factor)
         canonical_smiles = sanitize_smiles(smiles)
+        try:
+            composition_map = json.loads(composition) if composition else {}
+        except json.JSONDecodeError as error:
+            raise typer.BadParameter("--composition must be a JSON object") from error
+        if not isinstance(composition_map, dict):
+            raise typer.BadParameter("--composition must be a JSON object")
+        if not composition_map and phase.lower() == "liquid":
+            composition_map = {canonical_smiles: 1.0}
+        resolved_solvent = solvent or ("neat" if phase.lower() == "liquid" else None)
+        experimental_condition_details = {
+            "pressure_bar": pressure,
+            "composition": composition_map,
+            "solvent": resolved_solvent,
+            "concentration_mol_L": concentration,
+            "path_length_mm": path_length,
+            "atr_crystal": atr_crystal,
+            "atr_incidence_angle_degrees": atr_incidence_angle,
+            "sample_refractive_index": sample_refractive_index,
+        }
         engine = conformer_engine.lower()
         if engine not in {"goat", "rdkit"}:
             raise typer.BadParameter("Conformer engine must be 'goat' or 'rdkit'.")
         spectrum_model = spectrum_model.lower()
-        if spectrum_model not in {"raw", "practical"}:
-            raise typer.BadParameter("spectrum_model must be 'raw' or 'practical'.")
+        if spectrum_model not in {"raw", "practical", "experimental"}:
+            raise typer.BadParameter("spectrum_model must be 'raw', 'practical', or 'experimental'.")
+        if spectrum_model == "experimental":
+            from .experimental_ir import resolve_experimental_profile
+            from .ir_contracts import build_experimental_condition
+            try:
+                measurement_profile = resolve_experimental_profile(
+                    phase=phase, measurement=measurement,
+                    instrument_resolution_cm_1=instrument_resolution,
+                    apodization=apodization, residual_fwhm_cm_1=residual_fwhm,
+                )
+                build_experimental_condition(
+                    phase=measurement_profile.phase,
+                    measurement=measurement_profile.measurement,
+                    temperature_K=temperature,
+                    resolution_cm_1=measurement_profile.instrument_resolution_cm_1,
+                    apodization=measurement_profile.apodization,
+                    **experimental_condition_details,
+                )
+            except ValueError as error:
+                raise typer.BadParameter(str(error)) from error
+        fidelity = fidelity.lower()
+        if fidelity not in {"fast", "auto", "balanced"}:
+            raise typer.BadParameter("fidelity must be 'fast', 'auto', or 'balanced'; VPT2 and dynamics are not implemented yet.")
+        from .cluster_ir import dimer_sampling_plan
+        from .environment_selection import allocate_orca_budget, select_xtb_environment_representatives
+        from .environment_convergence import EnvironmentConvergenceConfig, convergence_schedule
+        from .xtb_sampling import sample_xtb_dimer_environments, xtb_sampling_defaults
+        cluster_plan = dimer_sampling_plan(
+            canonical_smiles, phase=phase.lower(), charge=charge, multiplicity=multiplicity,
+        )
+        requested_clusters = (
+            spectrum_model == "experimental" and fidelity in {"auto", "balanced"}
+            and cluster_plan["eligible"]
+        )
+        orca_allocation = allocate_orca_budget(
+            fidelity=fidelity, max_conformers=max_conformers,
+            max_environments=max_clusters, max_orca_jobs=max_orca_jobs,
+            environment_eligible=requested_clusters,
+        )
+        effective_max_conformers = orca_allocation["maximum_monomer_jobs"]
+        xtb_environment_plan = xtb_sampling_defaults(fidelity)
+        plan = {
+            "schema_version": 1,
+            "smiles": canonical_smiles,
+            "spectrum_model": spectrum_model,
+            "fidelity": fidelity,
+            "experimental_condition_details": experimental_condition_details,
+            "maximum_monomer_jobs": effective_max_conformers,
+            "maximum_cluster_jobs": orca_allocation["reserved_environment_jobs"],
+            "maximum_total_orca_jobs": max_orca_jobs,
+            "maximum_local_mode_orca_invocations": local_mode_orca_invocations,
+            "orca_allocation": orca_allocation,
+            "dimer_sampling": cluster_plan,
+            "dimer_sampling_requested": requested_clusters,
+            "xtb_environment_sampling": {
+                **xtb_environment_plan,
+                "requested": requested_clusters,
+                "xtb_sampling_orca_jobs_consumed": 0,
+                "representative_orca_jobs_reserved": orca_allocation["reserved_environment_jobs"],
+                "representative_selection": "mode_class_coverage_then_frequency_geometry_diversity",
+                "include_trimers": bool(cluster_plan.get("trimer_eligible")),
+            },
+            "adaptive_environment_convergence": {
+                "requested": requested_clusters,
+                "configuration": asdict(EnvironmentConvergenceConfig()),
+                "cumulative_batch_schedule": convergence_schedule(
+                    fidelity, orca_allocation["reserved_environment_jobs"],
+                ),
+            },
+            "unimplemented_tiers": ["microsolvation", "VPT2", "snapshot_dynamics", "AIMD"],
+        }
+        plan_path = run_dir / "spectrum-plan.json"
+        plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n")
+        if dry_run:
+            write_metadata(run_dir, workflow="ir_spectrum", smiles=canonical_smiles,
+                           calculation_plan=str(plan_path), status="planned_not_run")
+            typer.echo(json.dumps(plan, indent=2, sort_keys=True))
+            typer.echo(f"Plan: {plan_path}")
+            return
         seed_xyz = run_dir / "seed.xyz"
         smiles_to_xyz(canonical_smiles, seed_xyz)
         if engine == "goat":
             xyz_paths = run_goat_search(
                 seed_xyz, run_dir, charge=charge, multiplicity=multiplicity,
                 ncores=cores, population_cutoff=goat_population,
-                max_conformers=max_conformers, progress=typer.echo,
+                max_conformers=effective_max_conformers, progress=typer.echo,
             )
         else:
             initial_dir = run_dir / "initial-conformers"
-            xyz_paths = smiles_to_conformers(canonical_smiles, initial_dir, n_confs=initial_conformers, max_confs=max_conformers)
+            xyz_paths = smiles_to_conformers(canonical_smiles, initial_dir, n_confs=initial_conformers, max_confs=effective_max_conformers)
             write_metadata(run_dir, conformer_engine="rdkit", smiles=canonical_smiles, initial_conformers=len(xyz_paths))
+        cluster_paths: list[Path] = []
+        xtb_sampling_records: list[dict] = []
+        xtb_frequency_records: list[dict] = []
+        xtb_sampling_manifest: Path | None = None
+        environment_selection_error: str | None = None
+        if requested_clusters:
+            try:
+                xtb_sampling_records, xtb_sampling_manifest = sample_xtb_dimer_environments(
+                    canonical_smiles, run_dir, fidelity=fidelity,
+                    monomer_xyz=xyz_paths[0], charge=charge, multiplicity=multiplicity,
+                    ncores=cores, progress=typer.echo,
+                    include_trimers=bool(cluster_plan.get("trimer_eligible")),
+                )
+                retained_xtb = sum(
+                    record.get("sampling_status") == "retained"
+                    for record in xtb_sampling_records
+                )
+                typer.echo(
+                    f"Retained {retained_xtb}/{len(xtb_sampling_records)} restrained xTB environments: "
+                    f"{xtb_sampling_manifest}"
+                )
+                from .xtb_frequencies import sample_xtb_snapshot_frequencies
+                xtb_frequency_records, frequency_manifest = sample_xtb_snapshot_frequencies(
+                    xtb_sampling_records, run_dir, charge=charge,
+                    multiplicity=multiplicity, ncores=cores, progress=typer.echo,
+                )
+                typer.echo(
+                    f"Completed unrestrained xTB snapshot frequencies for "
+                    f"{sum(item.get('frequency_status') == 'completed' for item in xtb_frequency_records)}"
+                    f"/{len(xtb_frequency_records)} retained environments: {frequency_manifest}"
+                )
+            except Exception as error:
+                write_metadata(
+                    run_dir, xtb_environment_sampling_status="failed",
+                    xtb_environment_sampling_error=str(error),
+                )
+                typer.echo(
+                    f"Restrained xTB environment sampling failed; retaining the monomer spectrum ({error})",
+                    err=True,
+                )
+            if xtb_sampling_records:
+                try:
+                    cluster_paths, cluster_manifest = select_xtb_environment_representatives(
+                        xtb_sampling_records, run_dir,
+                        representative_count=orca_allocation["reserved_environment_jobs"],
+                        frequency_records=xtb_frequency_records,
+                    )
+                    typer.echo(
+                        f"Selected {len(cluster_paths)} diverse xTB environment representatives: "
+                        f"{cluster_manifest}"
+                    )
+                except Exception as error:
+                    environment_selection_error = str(error)
+                    write_metadata(
+                        run_dir, environment_selection_status="failed",
+                        environment_selection_error=environment_selection_error,
+                    )
+                    typer.echo(
+                        f"xTB diversity selection failed; retaining the monomer spectrum ({error})",
+                        err=True,
+                    )
+            if xtb_sampling_manifest and xtb_sampling_manifest.is_file():
+                environment_report = json.loads(xtb_sampling_manifest.read_text())
+                environment_report["orca_budget"] = orca_allocation
+                xtb_sampling_manifest.write_text(
+                    json.dumps(environment_report, indent=2, sort_keys=True) + "\n"
+                )
         write_metadata(
             run_dir, workflow="ir_spectrum", smiles=canonical_smiles, charge=charge,
             multiplicity=multiplicity, ncores=cores, temperature=temperature,
             scale_factor=resolved_scale_factor, scale_factor_source=scale_factor_source,
             harmonic_method_profile=profile, vibrational_treatment="harmonic",
             spectrum_model=spectrum_model,
-            spectrum_model_description="Boltzmann-weighted conformer ensemble with Gaussian broadening",
+            spectrum_model_description=(
+                "Calculated conformer ensemble plus condition-aware FTIR measurement transfer"
+                if spectrum_model == "experimental"
+                else "Boltzmann-weighted conformer ensemble with Gaussian broadening"
+            ),
             fwhm_cm_1=fwhm, spectrum_style=spectrum_style,
-            max_absorbance=max_absorbance, status="running",
+            max_absorbance=max_absorbance, phase=phase, measurement=measurement,
+            instrument_resolution_cm_1=instrument_resolution, apodization=apodization,
+            residual_fwhm_cm_1=residual_fwhm, status="running",
+            experimental_condition_details=experimental_condition_details,
+            fidelity=fidelity, max_orca_jobs=max_orca_jobs,
+            local_mode_orca_invocations=local_mode_orca_invocations,
+            orca_allocation=orca_allocation,
+            calculation_plan=str(plan_path), cluster_candidates=len(cluster_paths),
+            xtb_environment_sampling_status=(
+                "completed" if xtb_sampling_manifest is not None
+                else "not_requested_or_failed"
+            ),
+            xtb_environment_candidates=len(xtb_sampling_records),
+            xtb_environment_candidates_retained=sum(
+                record.get("sampling_status") == "retained"
+                for record in xtb_sampling_records
+            ),
+            xtb_environment_sampling_manifest=str(xtb_sampling_manifest or ""),
+            environment_selection_status=(
+                "completed" if cluster_paths else
+                "failed" if environment_selection_error else
+                "not_requested_or_unavailable"
+            ),
+            environment_selection_error=environment_selection_error,
         )
         result = run_ir_spectrum(
             xyz_paths,
@@ -311,9 +532,88 @@ def spectrum(
             max_absorbance=max_absorbance,
             spectrum_model=spectrum_model,
             practical_smiles=canonical_smiles,
+            phase=phase,
+            measurement=measurement,
+            instrument_resolution=instrument_resolution,
+            apodization=apodization,
+            residual_fwhm=residual_fwhm,
+            experimental_condition_details=experimental_condition_details,
             method_keywords=profile["orca_keywords"],
             progress=typer.echo,
         )
+        if cluster_paths:
+            from .spectrum import assemble_self_dimer_environment
+            from .environment_convergence import run_adaptive_environment_convergence
+            cluster_dir = run_dir / "clusters"
+            try:
+                typer.echo(f"Adaptively calculating up to {len(cluster_paths)} dimer/trimer environments")
+                def record_transfer_batch(endpoint: int, _batch_result: dict) -> list[Path]:
+                    from .environment_acquisition import (record_acquisition_batch,
+                                                           reprioritize_pending_representatives)
+                    from .frequency_transfer import build_frequency_transfer_artifacts
+                    transfer = build_frequency_transfer_artifacts(run_dir)
+                    record_acquisition_batch(run_dir, endpoint, transfer)
+                    return reprioritize_pending_representatives(run_dir, endpoint)
+
+                cluster_result, convergence_report = run_adaptive_environment_convergence(
+                    cluster_paths, cluster_dir, run_dir, fidelity=fidelity,
+                    scale_factor=resolved_scale_factor,
+                    run_batch=lambda paths: run_ir_spectrum(
+                        paths, cluster_dir, charge=0, multiplicity=1,
+                        ncores=cores, temperature=temperature,
+                        scale_factor=resolved_scale_factor, fwhm=fwhm,
+                        spectrum_style=spectrum_style, max_absorbance=max_absorbance,
+                        spectrum_model="raw", method_keywords=profile["orca_keywords"],
+                        geometry_role="environment_snapshot", progress=typer.echo,
+                    ),
+                    progress=typer.echo,
+                    after_batch=record_transfer_batch,
+                )
+                result = assemble_self_dimer_environment(
+                    result, cluster_result["conformers"], run_dir,
+                    scale_factor=resolved_scale_factor, fwhm=fwhm,
+                    spectrum_style=spectrum_style, max_absorbance=max_absorbance,
+                    phase=phase, measurement=measurement,
+                    instrument_resolution=instrument_resolution,
+                    apodization=apodization, residual_fwhm=residual_fwhm,
+                    environment_convergence=convergence_report,
+                    experimental_condition_details=experimental_condition_details,
+                )
+                if local_mode_orca_invocations > 0:
+                    from .environment_local_modes import run_environment_local_mode_fallbacks
+                    local_modes = run_environment_local_mode_fallbacks(
+                        run_dir,
+                        maximum_orca_invocations=local_mode_orca_invocations,
+                        ncores=cores, method_keywords=profile["orca_keywords"],
+                        progress=typer.echo,
+                    )
+                    result["environment_local_modes"] = local_modes.get("artifact")
+                    write_metadata(
+                        run_dir,
+                        environment_local_mode_status=local_modes.get("status"),
+                        environment_local_mode_artifact=local_modes.get("artifact"),
+                    )
+                from .frequency_transfer import build_frequency_transfer_artifacts
+                transfer_artifacts = build_frequency_transfer_artifacts(run_dir)
+                result.update(transfer_artifacts)
+                write_metadata(
+                    run_dir,
+                    frequency_transfer_status=transfer_artifacts.get("status"),
+                    frequency_transfer_use_status=transfer_artifacts.get(
+                        "frequency_transfer_use_status"
+                    ),
+                    frequency_transfer_display_basis=transfer_artifacts.get("display_basis"),
+                    frequency_transfer_artifact=str(
+                        transfer_artifacts.get("frequency_transfer") or ""
+                    ),
+                    frequency_transfer_validation_artifact=str(
+                        transfer_artifacts.get("frequency_transfer_validation") or ""
+                    ),
+                )
+            except Exception as error:
+                write_metadata(run_dir, cluster_calculation_status="failed_fallback_to_monomer",
+                               cluster_calculation_error=str(error), status="completed")
+                typer.echo(f"Dimer calculations incomplete; retaining monomer spectrum ({error})", err=True)
     except Exception:
         typer.echo(f"Run directory retained for diagnosis: {run_dir}", err=True)
         raise
@@ -322,6 +622,57 @@ def spectrum(
     typer.echo(f"Spectrum PNG: {result['spectrum_png']}")
     if "raw_spectrum_csv" in result:
         typer.echo(f"Raw calculated spectrum CSV: {result['raw_spectrum_csv']}")
+    if "ensemble_spectrum_csv" in result:
+        typer.echo(f"Calculated ensemble spectrum CSV: {result['ensemble_spectrum_csv']}")
+    if "intrinsic_spectrum_csv" in result:
+        typer.echo(f"Intrinsic calculated spectrum CSV: {result['intrinsic_spectrum_csv']}")
+
+
+@app.command(name="spectrum-extend-environments")
+def spectrum_extend_environments(
+    run_dir: Annotated[Path, typer.Argument(help="Existing experimental spectrum run.")],
+    maximum_candidates: Annotated[int, typer.Option(min=41, max=500, help="Hard cumulative xTB candidate cap.")] = 100,
+    batch_size: Annotated[int, typer.Option(min=5, max=100, help="New candidates per balanced acquisition round.")] = 20,
+    cores: Annotated[int, typer.Option(min=1, help="xTB CPU cores.")] = 1,
+) -> None:
+    """Extend a retained xTB environment ensemble in convergence-controlled rounds."""
+    from .adaptive_xtb_extension import extend_xtb_environment_ensemble
+
+    run_dir = Path(run_dir)
+    metadata_path = run_dir / "metadata.json"
+    sampling_path = run_dir / "environment-sampling.json"
+    if not metadata_path.is_file() or not sampling_path.is_file():
+        raise typer.BadParameter("Run lacks retained experimental environment artifacts")
+    metadata = json.loads(metadata_path.read_text())
+    sampling = json.loads(sampling_path.read_text()).get("sampling") or {}
+    configuration = sampling.get("configuration") or {}
+    monomer_xyz = Path(str(configuration.get("monomer_xyz") or ""))
+    smiles = metadata.get("smiles")
+    if not smiles or not monomer_xyz.is_file():
+        raise typer.BadParameter("Run lacks its retained SMILES or monomer sampling geometry")
+    result = extend_xtb_environment_ensemble(
+        run_dir, smiles=str(smiles), monomer_xyz=monomer_xyz,
+        maximum_candidates=maximum_candidates, batch_size=batch_size,
+        charge=int(metadata.get("charge", 0)),
+        multiplicity=int(metadata.get("multiplicity", 1)),
+        ncores=cores,
+        include_trimers=bool(configuration.get("cluster_model") == "dimers_plus_trimers"),
+        progress=typer.echo,
+    )
+    write_metadata(
+        run_dir, xtb_extension_status=result["status"],
+        xtb_extension_artifact=result["artifact"],
+        xtb_environment_candidates=result["final_candidates"],
+        xtb_extension_numerically_stable=result.get(
+            "numerically_stable_across_acquisition_rounds"
+        ),
+        xtb_extension_bootstrap_precision_pass=result.get(
+            "bootstrap_precision_pass"
+        ),
+    )
+    typer.echo(f"xTB extension status: {result['status']}")
+    typer.echo(f"Candidates evaluated: {result['final_candidates']}")
+    typer.echo(f"Artifact: {result['artifact']}")
 
 
 @app.command(name="spectrum-analyze")
@@ -364,6 +715,12 @@ def spectrum_resume(
     fwhm: Annotated[Optional[float], typer.Option(min=1.0, help="Override retained FWHM.")] = None,
     spectrum_style: Annotated[Optional[str], typer.Option(help="Override retained display style.")] = None,
     max_absorbance: Annotated[Optional[float], typer.Option(min=0.01, help="Override retained display absorbance.")] = None,
+    phase: Annotated[Optional[str], typer.Option(help="Override retained sample phase.")] = None,
+    measurement: Annotated[Optional[str], typer.Option(help="Override retained measurement geometry.")] = None,
+    instrument_resolution: Annotated[Optional[float], typer.Option(min=0.1, help="Override retained FTIR resolution.")] = None,
+    apodization: Annotated[Optional[str], typer.Option(help="Override retained apodization.")] = None,
+    residual_fwhm: Annotated[Optional[float], typer.Option(min=0.1, help="Override retained residual linewidth.")] = None,
+    local_mode_orca_invocations: Annotated[Optional[int], typer.Option(min=0, help="Explicit ORCA process-invocation allowance for local-mode fallbacks.")] = None,
 ) -> None:
     """Continue incomplete ORCA jobs using the original run settings by default."""
     from .spectrum import resume_ir_spectrum
@@ -371,6 +728,9 @@ def spectrum_resume(
         run_dir, charge=charge, multiplicity=multiplicity, ncores=cores,
         temperature=temperature, scale_factor=scale_factor, fwhm=fwhm,
         spectrum_style=spectrum_style, max_absorbance=max_absorbance,
+        phase=phase, measurement=measurement, instrument_resolution=instrument_resolution,
+        apodization=apodization, residual_fwhm=residual_fwhm,
+        local_mode_orca_invocations=local_mode_orca_invocations,
         progress=typer.echo,
     )
     typer.echo(f"Spectrum CSV: {result['spectrum_csv']}")
@@ -527,9 +887,14 @@ def spectrum_finalize(
     temperature: Annotated[Optional[float], typer.Option(min=1.0, help="Override retained Boltzmann temperature.")] = None,
     scale_factor: Annotated[Optional[float], typer.Option(min=0.1, max=1.2, help="Override retained harmonic scale factor.")] = None,
     fwhm: Annotated[Optional[float], typer.Option(min=1.0, help="Override retained Gaussian FWHM.")] = None,
-    spectrum_model: Annotated[Optional[str], typer.Option(help="Override retained model: raw or practical.")] = None,
+    spectrum_model: Annotated[Optional[str], typer.Option(help="Override retained model: raw, practical, or experimental.")] = None,
     spectrum_style: Annotated[Optional[str], typer.Option(help="Override retained display style.")] = None,
     max_absorbance: Annotated[Optional[float], typer.Option(min=0.01, help="Override retained display absorbance.")] = None,
+    phase: Annotated[Optional[str], typer.Option(help="Override retained sample phase.")] = None,
+    measurement: Annotated[Optional[str], typer.Option(help="Override retained measurement geometry.")] = None,
+    instrument_resolution: Annotated[Optional[float], typer.Option(min=0.1, help="Override retained FTIR resolution.")] = None,
+    apodization: Annotated[Optional[str], typer.Option(help="Override retained apodization.")] = None,
+    residual_fwhm: Annotated[Optional[float], typer.Option(min=0.1, help="Override retained residual linewidth.")] = None,
 ) -> None:
     """Build artifacts from completed conformers using retained settings by default."""
     from .spectrum import finalize_ir_spectrum
@@ -539,6 +904,8 @@ def spectrum_finalize(
             run_dir, temperature=temperature, scale_factor=scale_factor,
             fwhm=fwhm, spectrum_style=spectrum_style, max_absorbance=max_absorbance,
             spectrum_model=spectrum_model,
+            phase=phase, measurement=measurement, instrument_resolution=instrument_resolution,
+            apodization=apodization, residual_fwhm=residual_fwhm,
         )
     except Exception as error:
         raise typer.BadParameter(f"Could not finalize spectrum: {error}") from error

@@ -8,6 +8,46 @@
   than quasi-harmonic conformational Gibbs free energies. Duplicate minima that
   differ only through symmetry-equivalent atom mappings are not yet guaranteed
   to be collapsed.
+- The current dimer/trimer environment branch is a bounded static sample, not a
+  finite-temperature liquid ensemble. Its sufficiency gate prevents an
+  undersampled frequency spread from being displayed as a calculated width,
+  but passing the minimum gate does not supply trajectory populations, extended
+  hydrogen-bond networks, anharmonic lifetimes, or benchmark validation. The
+  restrained GFN2-xTB poses deliberately cover interaction coordinates and
+  therefore do not have thermodynamic populations. Selected medoids receive
+  equal geometry-stratum weights, not liquid occupancies. Their ORCA Hessians
+  are evaluated at restrained-xTB snapshots rather than unconstrained DFT
+  stationary points. Adaptive batch convergence tests numerical stability of
+  this bounded representative set; it does not establish bulk thermodynamic
+  convergence or repair its equal-stratum population approximation.
+  Strongly nonstationary snapshot Hessians are now marked diagnostic-only. An
+  environment-preserving DFT refinement and unrestrained gradient gate are
+  implemented. Projected local-mode finite differences are implemented and can
+  override matching transfer pairs, but automatic execution for every failed
+  representative is not enabled until the additional ORCA invocations fit the
+  global run budget and broader molecular validation passes.
+- Additive DFT correction transfer is currently limited to local X-H stretches.
+  It is exposed only for mode/coordination classes that pass withheld-
+  representative error and sampled-domain coverage gates. xTB intensities are
+  diagnostic and are not transferred as DFT intensities. The gated hybrid
+  diagnostic instead uses the representative-ORCA mean intensity within each
+  local mode class, not a learned snapshot-specific intensity correction. A passing harmonic
+  transfer corrects xTB toward the chosen ORCA harmonic method, not directly
+  toward experiment; it does not add anharmonicity or bulk populations.
+- A numerically stable restrained static ensemble can still have broad
+  bootstrap uncertainty. Static extension is capped and reported as
+  statistically imprecise when that occurs; it does not manufacture precision
+  or convert stratified equal weights into liquid occupancies.
+- General internal-coordinate fingerprints now track stretches, bends,
+  torsions, and ring deformations across equal-sized Hessians. Generalized
+  cross-size dimer/trimer matching is not complete: mixed cluster sizes still
+  use the validated target-local X-H path, and coupled fingerprint-region modes
+  require additional atom-mapping and degenerate-subspace validation.
+- `spectrum_intrinsic.csv` is separated from the rendered measurement, but the
+  current ATR response remains a first-order penetration-depth approximation.
+  Exact ATR optics, transmission absorbance, and absolute intensity require
+  condition fields such as refractive indices, concentration, and path length;
+  recording those fields does not yet mean every transfer model uses them.
 - ORCA, xTB, RMG, RDKit, and Open Babel are external or optional dependencies.
   `storca doctor` only checks whether they are discoverable; it does not
   validate an installation or a scientific setup.

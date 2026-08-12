@@ -60,12 +60,14 @@ def create_orca_input(
 
     # Method and basis / keywords
     if use_goat:
-        xtb_exe = shutil.which("xtb")
-        if xtb_exe is None:
+        try:
+            from src.orca_runner import find_xtb
+            find_xtb()
+        except RuntimeError as error:
             raise XTBNotFoundError(
-                "xTB executable not found in PATH. GOAT input requires xTB. "
-                "Please install xTB and ensure it is in your PATH."
-            )
+                "GOAT requires xTB, but no executable was found in the active Python environment or PATH. "
+                "Install xTB or set STORCA_XTB_BIN."
+            ) from error
         keywords = ["GOAT", "xTB"]
     elif method_keywords:
         keywords = list(method_keywords)
@@ -283,6 +285,58 @@ def create_orca_constrained_opt_input(
     return _write_orca_xyzfile_job(
         xyz_file, label=label, charge=charge, multiplicity=multiplicity, ncores=ncores,
         keyword_line=_orca_method_line(method_keywords, "TightSCF", "Opt"), blocks=[geom],
+    )
+
+
+def create_orca_environment_refinement_input(
+    xyz_file: Path,
+    *,
+    interactions: list[dict],
+    charge: int,
+    multiplicity: int,
+    label: str = "environment-refine",
+    ncores: int = 1,
+    max_iterations: int = 120,
+    constrain_angles: bool = True,
+    method_keywords: list[str] | None = None,
+) -> Path:
+    """Create a DFT optimization that preserves explicit H-bond coordinates.
+
+    Constraints define the environment during optimization only.  Frequencies
+    must be evaluated in a separate input without this ``%geom`` block.
+    """
+    if max_iterations < 1 or not interactions:
+        raise ValueError("Environment refinement needs interactions and positive MaxIter")
+    constraints = []
+    for interaction in interactions:
+        donor = int(interaction["donor_atom"])
+        hydrogen = int(interaction["donor_hydrogen"])
+        acceptor = int(interaction["acceptor_atom"])
+        distance = float(interaction["h_bond_distance_angstrom"])
+        angle = float(interaction["donor_h_acceptor_angle_degrees"])
+        if min(donor, hydrogen, acceptor) < 0 or not 0.5 < distance < 5.0 or not 30.0 < angle <= 180.0:
+            raise ValueError("Invalid environment-refinement interaction geometry")
+        constraints.append(f"    {{ B {hydrogen} {acceptor} {distance:.8f} C }}")
+        if constrain_angles:
+            constraints.append(f"    {{ A {donor} {hydrogen} {acceptor} {angle:.8f} C }}")
+    geom = "\n".join([
+        "%geom", f"  MaxIter {max_iterations}", "  Constraints",
+        *constraints, "  end", "end",
+    ])
+    return _write_orca_xyzfile_job(
+        xyz_file, label=label, charge=charge, multiplicity=multiplicity, ncores=ncores,
+        keyword_line=_orca_method_line(method_keywords, "TightSCF", "Opt"), blocks=[geom],
+    )
+
+
+def create_orca_gradient_input(
+    xyz_file: Path, *, charge: int, multiplicity: int, label: str = "gradient",
+    ncores: int = 1, method_keywords: list[str] | None = None,
+) -> Path:
+    """Create an unrestrained analytic-gradient job for a retained geometry."""
+    return _write_orca_xyzfile_job(
+        xyz_file, label=label, charge=charge, multiplicity=multiplicity, ncores=ncores,
+        keyword_line=_orca_method_line(method_keywords, "TightSCF", "EnGrad"),
     )
 
 

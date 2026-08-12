@@ -196,105 +196,160 @@ def _target_flux_snapshot(gas, reactor, target_index):
     return records
 
 
+def _logarithmic_times(horizon, points, earliest_time):
+    """Build a bounded log grid with an explicit fast-chemistry floor."""
+    horizon = float(horizon)
+    points = max(3, int(points))
+    earliest_time = min(horizon, max(float(earliest_time), horizon * 1e-30, 1e-300))
+    if earliest_time == horizon:
+        return [0.0, horizon]
+    start = math.log10(earliest_time)
+    stop = math.log10(horizon)
+    times = [0.0] + [10 ** (start + (stop - start) * i / float(points - 2))
+                     for i in range(points - 1)]
+    times[-1] = horizon
+    return sorted(set(times))
+
+
+def _integrate_flux_snapshots(profile, flux_snapshots, reaction_count):
+    """Trapezoid-integrate retained rates on one propagation pass."""
+    keys = ("destruction_kmol_s", "production_kmol_s", "forward_extent_kmol_s", "reverse_extent_kmol_s")
+    totals = {key: [0.0] * reaction_count for key in keys}
+    for point_index in range(1, len(profile)):
+        delta_time = profile[point_index]["time_seconds"] - profile[point_index - 1]["time_seconds"]
+        previous = flux_snapshots[point_index - 1]
+        current = flux_snapshots[point_index]
+        for reaction_index in range(reaction_count):
+            for key in keys:
+                totals[key][reaction_index] += 0.5 * delta_time * (
+                    previous[reaction_index][key] + current[reaction_index][key]
+                )
+    return totals
+
+
+def _flux_closure(initial_amount, final_amount, integrated_destruction, integrated_production):
+    amount_loss = initial_amount - final_amount
+    integrated_net_loss = sum(integrated_destruction) - sum(integrated_production)
+    absolute_error = abs(integrated_net_loss - amount_loss)
+    scale = max(abs(amount_loss), abs(integrated_net_loss), abs(initial_amount) * 1e-12, 1e-300)
+    return amount_loss, integrated_net_loss, absolute_error, absolute_error / scale
+
+
 def propagate(payload):
     """Reintegrate a retained mechanism and retain target-loss attribution."""
     import cantera as ct
     from rmgpy.chemkin import load_chemkin_file, get_species_identifier
     species, reactions = load_chemkin_file(payload["chemkin"], dictionary_path=payload.get("dictionary"))
-    gas = _cantera_solution(species, reactions)
-    for raw_index, multiplier in (payload.get("reaction_multipliers") or {}).items():
+    multipliers = payload.get("reaction_multipliers") or {}
+    for raw_index, multiplier in multipliers.items():
         reaction_index = int(raw_index)
         value = float(multiplier)
         if not math.isfinite(value) or value < 0.0:
             raise ValueError("Reaction multipliers must be finite and nonnegative")
-        gas.set_multiplier(value, reaction_index)
     identifiers = {item.label: _species_identifier(item, get_species_identifier) for item in species}
     requested = payload["initial_mole_fractions"]
     composition = {}
     for label, fraction in requested.items():
         identifier = identifiers.get(label, label)
-        if identifier not in gas.species_names:
-            raise ValueError("Initial species not found in retained mechanism: %s" % label)
         composition[identifier] = float(fraction)
     if abs(sum(composition.values()) - 1.0) > 1e-8:
         raise ValueError("Initial mole fractions must sum to one")
-    gas.TPX = float(payload["temperature_K"]), float(payload["pressure_bar"]) * 1e5, composition
-    try:
-        reactor = ct.IdealGasConstPressureReactor(gas)
-    except TypeError:
-        reactor = ct.IdealGasConstPressureReactor(contents=gas)
-    network = ct.ReactorNet([reactor])
     target = identifiers.get(payload["target_label"], payload["target_label"])
-    if target not in gas.species_names:
-        raise ValueError("Target species not found in retained mechanism: %s" % payload["target_label"])
-    index = gas.species_index(target)
     horizon = float(payload["target_duration_seconds"])
-    points = max(2, min(int(payload.get("points", 160)), 500))
-    times = [0.0] + [horizon * (10 ** (math.log10(1e-12) + (12.0 * i / float(points - 2)))) for i in range(points - 1)]
-    # Ensure exact horizon and remove duplicate underflow values.
-    times[-1] = horizon
-    times = sorted(set(times))
-
-    def amount_kmol():
-        return reactor.mass * gas.Y[index] / gas.molecular_weights[index]
-
-    initial_amount = amount_kmol()
-    profile = []
-    flux_snapshots = []
-    for time in times:
-        if time:
-            network.advance(time)
-        amount = amount_kmol()
-        profile.append({"time_seconds": time, "target_amount_kmol": amount,
-                        "target_fraction_remaining": amount / initial_amount if initial_amount else None,
-                        "target_mole_fraction": float(gas.X[index])})
-        flux_snapshots.append(_target_flux_snapshot(gas, reactor, index))
+    if not math.isfinite(horizon) or horizon <= 0.0:
+        raise ValueError("target_duration_seconds must be finite and positive")
+    points = max(3, min(int(payload.get("points", 160)), 500))
+    max_points = max(points, min(int(payload.get("flux_max_points", 2000)), 5000))
+    max_refinements = max(0, min(int(payload.get("flux_refinement_attempts", 3)), 5))
+    closure_target = float(payload.get("flux_refinement_closure_target", 0.05))
+    if not math.isfinite(closure_target) or not 0.0 < closure_target < 1.0:
+        raise ValueError("flux_refinement_closure_target must be between zero and one")
     retention = float(payload.get("retention_fraction", 0.95))
-    crossing = None
-    for prior, current in zip(profile, profile[1:]):
-        if prior["target_fraction_remaining"] >= retention >= current["target_fraction_remaining"]:
-            denominator = prior["target_fraction_remaining"] - current["target_fraction_remaining"]
-            crossing = current["time_seconds"] if denominator == 0 else prior["time_seconds"] + (
-                (prior["target_fraction_remaining"] - retention) / denominator * (current["time_seconds"] - prior["time_seconds"])
-            )
+
+    def run_pass(earliest_time, pass_points):
+        gas = _cantera_solution(species, reactions)
+        for raw_index, multiplier in multipliers.items():
+            gas.set_multiplier(float(multiplier), int(raw_index))
+        for label in composition:
+            if label not in gas.species_names:
+                raise ValueError("Initial species not found in retained mechanism: %s" % label)
+        gas.TPX = float(payload["temperature_K"]), float(payload["pressure_bar"]) * 1e5, composition
+        try:
+            reactor = ct.IdealGasConstPressureReactor(gas)
+        except TypeError:
+            reactor = ct.IdealGasConstPressureReactor(contents=gas)
+        network = ct.ReactorNet([reactor])
+        if target not in gas.species_names:
+            raise ValueError("Target species not found in retained mechanism: %s" % payload["target_label"])
+        index = gas.species_index(target)
+
+        def amount_kmol():
+            return reactor.mass * gas.Y[index] / gas.molecular_weights[index]
+
+        initial = amount_kmol()
+        pass_profile = []
+        pass_snapshots = []
+        for time in _logarithmic_times(horizon, pass_points, earliest_time):
+            if time:
+                network.advance(time)
+            amount = amount_kmol()
+            pass_profile.append({"time_seconds": time, "target_amount_kmol": amount,
+                                 "target_fraction_remaining": amount / initial if initial else None,
+                                 "target_mole_fraction": float(gas.X[index])})
+            pass_snapshots.append(_target_flux_snapshot(gas, reactor, index))
+        pass_crossing = None
+        for prior, current in zip(pass_profile, pass_profile[1:]):
+            if prior["target_fraction_remaining"] >= retention >= current["target_fraction_remaining"]:
+                denominator = prior["target_fraction_remaining"] - current["target_fraction_remaining"]
+                pass_crossing = current["time_seconds"] if denominator == 0 else prior["time_seconds"] + (
+                    (prior["target_fraction_remaining"] - retention) / denominator
+                    * (current["time_seconds"] - prior["time_seconds"])
+                )
+                break
+        totals = _integrate_flux_snapshots(pass_profile, pass_snapshots, gas.n_reactions)
+        closure = _flux_closure(
+            initial, pass_profile[-1]["target_amount_kmol"],
+            totals["destruction_kmol_s"], totals["production_kmol_s"],
+        )
+        return gas, initial, pass_profile, pass_snapshots, pass_crossing, totals, closure
+
+    earliest_time = horizon * 1e-12
+    refinement_history = []
+    for refinement in range(max_refinements + 1):
+        gas, initial_amount, profile, flux_snapshots, crossing, totals, closure = run_pass(
+            earliest_time, points,
+        )
+        amount_loss, integrated_net_loss, closure_absolute_error, closure_error = closure
+        crossing_time_resolved = bool(
+            crossing is None or profile[1]["time_seconds"] <= crossing * 1e-2
+        )
+        refinement_history.append({
+            "attempt": refinement + 1,
+            "sample_count": len(profile),
+            "earliest_nonzero_time_seconds": profile[1]["time_seconds"],
+            "estimated_time_to_retention_seconds": crossing,
+            "numerical_closure_relative_error": closure_error,
+            "crossing_time_resolved": crossing_time_resolved,
+        })
+        if (closure_error <= closure_target and crossing_time_resolved) or refinement == max_refinements:
             break
+        # A crossing from the coarse pass identifies the missed fast-chemistry
+        # scale.  Start four decades before it; repeated failures push the
+        # floor three more decades earlier while increasing quadrature density.
+        anchor = crossing or profile[1]["time_seconds"]
+        earliest_time = min(earliest_time * 1e-3, anchor * 1e-4)
+        points = min(max_points, max(points * 2, 320))
+
     equations = _reaction_equations(gas)
-    integrated_destruction = [0.0] * gas.n_reactions
-    integrated_production = [0.0] * gas.n_reactions
-    integrated_forward_extent = [0.0] * gas.n_reactions
-    integrated_reverse_extent = [0.0] * gas.n_reactions
-    for point_index in range(1, len(profile)):
-        delta_time = profile[point_index]["time_seconds"] - profile[point_index - 1]["time_seconds"]
-        previous = flux_snapshots[point_index - 1]
-        current = flux_snapshots[point_index]
-        for reaction_index in range(gas.n_reactions):
-            integrated_destruction[reaction_index] += 0.5 * delta_time * (
-                previous[reaction_index]["destruction_kmol_s"] + current[reaction_index]["destruction_kmol_s"]
-            )
-            integrated_production[reaction_index] += 0.5 * delta_time * (
-                previous[reaction_index]["production_kmol_s"] + current[reaction_index]["production_kmol_s"]
-            )
-            integrated_forward_extent[reaction_index] += 0.5 * delta_time * (
-                previous[reaction_index]["forward_extent_kmol_s"] + current[reaction_index]["forward_extent_kmol_s"]
-            )
-            integrated_reverse_extent[reaction_index] += 0.5 * delta_time * (
-                previous[reaction_index]["reverse_extent_kmol_s"] + current[reaction_index]["reverse_extent_kmol_s"]
-            )
+    integrated_destruction = totals["destruction_kmol_s"]
+    integrated_production = totals["production_kmol_s"]
+    integrated_forward_extent = totals["forward_extent_kmol_s"]
+    integrated_reverse_extent = totals["reverse_extent_kmol_s"]
     total_destruction = sum(integrated_destruction)
     total_production = sum(integrated_production)
     positive_net_target_loss = [max(0.0, destruction - production)
                                 for destruction, production in zip(integrated_destruction, integrated_production)]
     total_positive_net_target_loss = sum(positive_net_target_loss)
-    amount_loss = initial_amount - profile[-1]["target_amount_kmol"]
-    integrated_net_loss = total_destruction - total_production
-    # A relative closure metric alone is misleading when a reversible system
-    # has essentially zero net conversion: two tiny, nearly cancelling values
-    # can have a large relative difference.  Retain both metrics so the policy
-    # layer can distinguish numerical dust from material target loss without
-    # discarding the underlying gross turnover evidence.
-    closure_absolute_error = abs(integrated_net_loss - amount_loss)
-    closure_scale = max(abs(amount_loss), abs(integrated_net_loss), abs(initial_amount) * 1e-12, 1e-300)
-    closure_error = closure_absolute_error / closure_scale
     reaction_flux = []
     for reaction_index, equation in enumerate(equations):
         destruction = integrated_destruction[reaction_index]
@@ -334,14 +389,25 @@ def propagate(payload):
             ),
         })
     reaction_flux.sort(key=lambda item: item["integrated_target_destruction_kmol"], reverse=True)
+    finite_flux = all(math.isfinite(value) for value in (
+        total_destruction, total_production, initial_amount, amount_loss, integrated_net_loss,
+        closure_absolute_error, closure_error,
+    ))
+    refinement_converged = closure_error <= closure_target and crossing_time_resolved
     flux_attribution = {
-        "status": "completed" if all(math.isfinite(value) for value in (
-            total_destruction, total_production, initial_amount, amount_loss, integrated_net_loss,
-            closure_absolute_error, closure_error
-        )) else "invalid",
+        "status": "completed" if finite_flux and refinement_converged else "incomplete_adaptive_refinement",
         "basis": "time_integrated_cantera_rates_of_progress",
         "rate_basis": "kmol_s-1_after_reactor_volume",
         "sample_count": len(profile),
+        "adaptive_refinement": {
+            "status": (
+                "converged"
+                if refinement_converged
+                else "exhausted_without_closure_or_crossing_resolution"
+            ),
+            "closure_target": closure_target,
+            "attempts": refinement_history,
+        },
         "total_integrated_target_destruction_kmol": total_destruction,
         "total_integrated_target_production_kmol": total_production,
         "total_integrated_positive_net_target_loss_kmol": total_positive_net_target_loss,

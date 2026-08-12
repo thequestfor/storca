@@ -8,7 +8,7 @@ from PIL import Image, ImageDraw
 
 from src.inputgen import create_orca_input, create_orca_irc_input, create_orca_neb_ts_input, create_orca_relaxed_scan_input
 from src.inputgen import create_rmg_input
-from src.orca_runner import find_orca, run_arkane, run_rmg
+from src.orca_runner import find_orca, find_xtb, run_arkane, run_rmg
 from src.parser import classify_chemkin_route, parse_chemkin_annotated, parse_orca_ir, parse_orca_orbitals
 from storca.runs import create_run_directory, write_metadata
 from storca.benchmark import compare_spectra
@@ -16,6 +16,24 @@ from storca.analysis import analyze_ir_spectra, detect_ir_peaks, match_ir_peaks
 from storca.digitize import PlotCalibration, SDBS_IR_CALIBRATION, digitize_transmittance
 from storca.methods import harmonic_method_profile, resolve_scale_factor
 from storca.practical_ir import describe_molecule, practical_band_transform
+from storca.experimental_ir import (apply_environment_convergence_status, apply_measurement_response,
+                                    collapse_insufficient_environment_bands,
+                                    ensemble_band_statistics, evaluate_environment_sufficiency,
+                                    resolve_experimental_profile)
+from storca.ir_modes import (NormalModeSet, local_stretch_mode_assignments,
+                             match_normal_modes, parse_orca_normal_modes)
+from storca.cluster_ir import (classify_local_stretch_bonds, dimer_sampling_plan, generate_dimer_candidates,
+                               generate_stratified_dimer_poses, generate_stratified_trimer_poses,
+                               normalize_environment_cluster_records, normalize_self_dimer_records)
+from storca.xtb_sampling import (run_xtb_candidate, sample_xtb_dimer_environments,
+                                 xtb_sampling_defaults, _xcontrol_text)
+from storca.environment_selection import (aligned_heavy_atom_rmsd, allocate_orca_budget,
+                                          incremental_diversity_order,
+                                          pairwise_environment_distances,
+                                          select_xtb_environment_representatives)
+from storca.environment_convergence import (compare_environment_batches, convergence_schedule,
+                                            evaluate_completed_environment_batches,
+                                            spectrum_cosine_overlap)
 from storca.describe import describe_smiles
 from storca.ir_benchmark import evaluate_ir_manifest
 from storca.calibration import scale_grid
@@ -25,8 +43,8 @@ from storca.enrich import enrich_pubchem
 from storca.plausibility_benchmark import evaluate_plausibility_manifest
 from storca.plausibility import attach_rmg_evidence, create_plausibility_dossier
 from storca.spectrum import (boltzmann_weights, build_ir_spectrum, format_spectrum,
-                             resume_ir_spectrum, select_goat_conformers, _completed_optimization,
-                             _write_ir_artifacts)
+                             resume_ir_spectrum, run_ir_spectrum, select_goat_conformers, _completed_optimization,
+                             _write_ir_artifacts, assemble_self_dimer_environment)
 from storca.stability import (_reaction_space_budget, _recommended_rmg_database_libraries,
                               _resolve_rmg_route_endpoints, resolve_stability_configuration,
                               run_stability_screen)
@@ -534,6 +552,684 @@ class FoundationTests(unittest.TestCase):
         self.assertAlmostEqual(float(np.trapezoid(narrow, grid_narrow)), 10.0, places=5)
         self.assertAlmostEqual(float(np.trapezoid(wide, grid_wide)), 10.0, places=5)
 
+    def test_ensemble_band_statistics_reports_calculated_frequency_spread(self):
+        conformers = [
+            {"weight": 0.75, "ir_modes": [{"mode": 4, "freq": 1000.0, "intensity": 10.0}]},
+            {"weight": 0.25, "ir_modes": [{"mode": 4, "freq": 1040.0, "intensity": 18.0}]},
+        ]
+        bands = ensemble_band_statistics(conformers, scale_factor=1.0)
+        self.assertEqual(len(bands), 1)
+        self.assertAlmostEqual(bands[0]["mean_frequency_cm-1"], 1010.0)
+        self.assertAlmostEqual(bands[0]["frequency_stddev_cm-1"], np.sqrt(300.0))
+        self.assertGreater(bands[0]["ensemble_fwhm_equivalent_cm-1"], 40.0)
+
+    def test_environment_width_requires_three_independent_environments(self):
+        decision = evaluate_environment_sufficiency([{
+            "position": 0,
+            "independent_environment_id": "only-environment",
+            "frequency": 3350.0,
+            "weight": 1.0,
+            "overlap": 0.95,
+            "environment_features": {
+                "geometry_cluster_id": "cluster-1",
+                "h_bond_distance_angstrom": 1.8,
+                "donor_h_acceptor_angle_degrees": 170.0,
+            },
+        }])
+        self.assertEqual(decision["width_status"], "insufficient_environment_sampling")
+        self.assertEqual(decision["calculated_environment_fwhm_cm-1"], 0.0)
+        self.assertEqual(decision["display_width_source"], "residual_plus_instrument")
+        self.assertIn("fewer_than_minimum_independent_environments", decision["sufficiency_failures"])
+        self.assertIn("frequency_variance_below_minimum", decision["sufficiency_failures"])
+
+    def test_environment_width_passes_diverse_effective_matched_ensemble(self):
+        members = []
+        for index, (frequency, distance, angle) in enumerate((
+            (3280.0, 1.70, 178.0),
+            (3350.0, 1.90, 158.0),
+            (3430.0, 2.15, 132.0),
+        )):
+            members.append({
+                "position": index,
+                "independent_environment_id": f"environment-{index}",
+                "frequency": frequency,
+                "weight": 1.0 / 3.0,
+                "overlap": 0.8,
+                "environment_features": {
+                    "geometry_cluster_id": f"cluster-{index}",
+                    "h_bond_distance_angstrom": distance,
+                    "donor_h_acceptor_angle_degrees": angle,
+                    "intermolecular_orientation_degrees": index * 60.0,
+                },
+            })
+        decision = evaluate_environment_sufficiency(members)
+        self.assertEqual(decision["width_status"], "calculated_environment_width")
+        self.assertAlmostEqual(decision["effective_sample_size"], 3.0)
+        self.assertGreater(decision["calculated_environment_fwhm_cm-1"], 0.0)
+        self.assertEqual(decision["sufficiency_failures"], [])
+
+    def test_environment_ess_and_geometry_are_aggregated_by_cluster(self):
+        members = []
+        for cluster, distance in enumerate((1.7, 1.9, 2.1, 2.3)):
+            for oscillator in range(3):
+                members.append({
+                    "position": cluster, "independent_environment_id": f"env-{cluster}",
+                    "frequency": 3300.0 + cluster * 30.0 + oscillator,
+                    "weight": 1.0 / 12.0, "overlap": 0.9,
+                    "environment_features": {
+                        "geometry_cluster_id": f"cluster-{cluster}",
+                        "h_bond_distance_angstrom": distance,
+                        "donor_h_acceptor_angle_degrees": 175.0 - cluster * 15.0,
+                    },
+                })
+        decision = evaluate_environment_sufficiency(members)
+        self.assertEqual(decision["environments"], 4)
+        self.assertEqual(decision["geometric_diversity"]["distinct_geometry_clusters"], 4)
+        self.assertAlmostEqual(decision["effective_sample_size"], 4.0)
+        self.assertEqual(decision["width_status"], "calculated_environment_width")
+
+    def test_environment_width_rejects_low_ess_and_mode_confidence(self):
+        members = []
+        for index, weight in enumerate((0.90, 0.05, 0.05)):
+            members.append({
+                "position": index,
+                "independent_environment_id": f"environment-{index}",
+                "frequency": 3300.0 + index * 60.0,
+                "weight": weight,
+                "overlap": 0.4 if index == 2 else 0.9,
+                "environment_features": {
+                    "geometry_cluster_id": f"cluster-{index}",
+                    "h_bond_distance_angstrom": 1.7 + index * 0.2,
+                    "donor_h_acceptor_angle_degrees": 175.0 - index * 20.0,
+                },
+            })
+        decision = evaluate_environment_sufficiency(members)
+        self.assertIn("effective_sample_size_below_minimum", decision["sufficiency_failures"])
+        self.assertIn("mode_matching_confidence_below_minimum", decision["sufficiency_failures"])
+
+    def test_failed_environment_distribution_is_collapsed_to_weighted_center(self):
+        conformers = [
+            {"weight": 0.5, "ir_modes": [{"mode": 4, "freq": 1000.0, "intensity": 10.0}]},
+            {"weight": 0.5, "ir_modes": [{"mode": 4, "freq": 1100.0, "intensity": 10.0}]},
+        ]
+        collapsed, bands = collapse_insufficient_environment_bands(conformers, scale_factor=1.0)
+        self.assertEqual(bands[0]["width_status"], "insufficient_environment_sampling")
+        self.assertEqual([item["ir_modes"][0]["freq"] for item in collapsed], [1050.0, 1050.0])
+
+    def test_environment_convergence_schedule_is_cumulative_and_budget_capped(self):
+        self.assertEqual(convergence_schedule("auto", 4), [2, 3, 4])
+        self.assertEqual(convergence_schedule("balanced", 6), [2, 4, 6])
+        self.assertEqual(convergence_schedule("auto", 3), [2, 3])
+
+    def test_incremental_environment_order_starts_central_then_adds_diversity(self):
+        matrix = np.asarray([
+            [0.0, 1.0, 5.0, 2.0],
+            [1.0, 0.0, 4.0, 1.0],
+            [5.0, 4.0, 0.0, 3.0],
+            [2.0, 1.0, 3.0, 0.0],
+        ])
+        order = incremental_diversity_order(matrix)
+        self.assertEqual(order[0], 1)
+        self.assertEqual(order[1], 2)
+        self.assertEqual(sorted(order), [0, 1, 2, 3])
+
+    def test_batch_comparison_requires_stable_bands_overlap_and_mode_confidence(self):
+        def snapshot(center, width, spectrum):
+            return {
+                "integrated_intensity": 10.0,
+                "spectrum": np.asarray(spectrum, dtype=float),
+                "bands": [{
+                    "mode": 4,
+                    "mean_frequency_cm-1": center,
+                    "ensemble_fwhm_equivalent_cm-1": width,
+                    "population_weighted_intensity": 20.0,
+                    "minimum_displacement_overlap": 0.8,
+                }],
+            }
+        comparison = compare_environment_batches(
+            snapshot(3350.0, 100.0, [0.0, 1.0, 0.5]),
+            snapshot(3352.0, 106.0, [0.0, 1.0, 0.5]),
+        )
+        self.assertTrue(comparison["passed"])
+        self.assertGreater(spectrum_cosine_overlap(np.ones(3), np.ones(3)), 0.999)
+
+    def test_unconverged_sufficient_width_is_retained_but_explicitly_provisional(self):
+        bands = apply_environment_convergence_status([{
+            "width_status": "calculated_environment_width",
+            "calculated_environment_fwhm_cm-1": 120.0,
+        }], {"summary": {"status": "environment_width_unconverged", "converged": False}})
+        self.assertEqual(bands[0]["width_status"], "environment_width_unconverged")
+        self.assertEqual(bands[0]["calculated_environment_fwhm_cm-1"], 120.0)
+        self.assertFalse(bands[0]["converged"])
+
+    def test_two_consecutive_batch_passes_mark_environment_converged(self):
+        def fake_snapshot(records, scale_factor, config):
+            count = len(records)
+            return {
+                "records": records,
+                "successful_environments": count,
+                "grid": np.arange(3.0),
+                "spectrum": np.asarray([0.0, 1.0, 0.5]),
+                "integrated_intensity": 10.0,
+                "bands": [{
+                    "mode": 4,
+                    "mean_frequency_cm-1": 3350.0 + count * 0.5,
+                    "ensemble_fwhm_equivalent_cm-1": 100.0 + count,
+                    "population_weighted_intensity": 20.0,
+                    "minimum_displacement_overlap": 0.8,
+                }],
+            }
+        with tempfile.TemporaryDirectory() as temp, patch(
+            "storca.environment_convergence._batch_snapshot", side_effect=fake_snapshot,
+        ):
+            folder = Path(temp)
+            report = evaluate_completed_environment_batches(
+                [(2, [{}, {}]), (3, [{}, {}, {}]), (4, [{}, {}, {}, {}])],
+                folder, fidelity="auto", scale_factor=1.0,
+                representative_budget=4, budget_exhausted=True,
+            )
+            retained = json.loads((folder / "environment-convergence.json").read_text())
+        self.assertTrue(report["summary"]["converged"])
+        self.assertEqual(retained["summary"]["stop_reason"], "two_consecutive_batches_passed")
+
+    def test_orca_hessian_normal_modes_parse_block_matrix(self):
+        content = """$vibrational_frequencies
+6
+0 0.0
+1 0.0
+2 0.0
+3 0.0
+4 0.0
+5 1000.0
+$normal_modes
+6 6
+ 0 1 2 3 4
+0 0 0 0 0 0
+1 0 0 0 0 0
+2 0 0 0 0 0
+3 0 0 0 0 0
+4 0 0 0 0 0
+5 0 0 0 0 0
+ 5
+0 1
+1 0
+2 0
+3 -1
+4 0
+5 0
+$atoms
+2
+H 1.0 0.0 0.0 0.0
+H 1.0 1.0 0.0 0.0
+$end
+"""
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "freq.hess"
+            path.write_text(content)
+            modes = parse_orca_normal_modes(path)
+        self.assertEqual(modes.vectors.shape, (6, 2, 3))
+        self.assertEqual(modes.atom_labels, ("H", "H"))
+        self.assertEqual(modes.frequencies_cm_1[-1], 1000.0)
+        self.assertEqual(modes.vectors[5, 1, 0], -1.0)
+
+    def test_normal_mode_matching_survives_rotation_and_mode_reordering(self):
+        coordinates = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+        vectors = np.zeros((2, 2, 3))
+        vectors[0, :, 0] = [1.0, -1.0]
+        vectors[1, :, 1] = [1.0, -1.0]
+        reference = NormalModeSet(np.array([1000.0, 1100.0]), vectors, ("H", "H"), coordinates)
+        rotation = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+        candidate = NormalModeSet(
+            np.array([1102.0, 998.0]), (vectors[[1, 0]] @ rotation.T),
+            ("H", "H"), coordinates @ rotation.T,
+        )
+        matches = match_normal_modes(reference, candidate)
+        self.assertEqual([item["candidate_mode"] for item in matches], [1, 0])
+        self.assertTrue(all(item["confidence"] == "high" for item in matches))
+
+    def test_dimer_sampling_is_bounded_and_condition_gated(self):
+        self.assertTrue(dimer_sampling_plan("CCO", phase="liquid", charge=0, multiplicity=1)["eligible"])
+        self.assertTrue(dimer_sampling_plan("O", phase="liquid", charge=0, multiplicity=1)["eligible"])
+        self.assertFalse(dimer_sampling_plan("CC", phase="liquid", charge=0, multiplicity=1)["eligible"])
+        self.assertFalse(dimer_sampling_plan("CCO", phase="solution", charge=0, multiplicity=1)["eligible"])
+        with tempfile.TemporaryDirectory() as temp:
+            paths, manifest = generate_dimer_candidates(
+                "CCO", Path(temp) / "selected-conformers", max_clusters=2,
+            )
+            report = json.loads(manifest.read_text())
+        self.assertLessEqual(len(paths), 2)
+        self.assertGreaterEqual(len(paths), 1)
+        self.assertEqual(report["retained_candidates"][0]["index"], 1)
+        self.assertIn("not bulk-liquid populations", report["population_warning"])
+
+    def test_stratified_dimer_poses_cover_requested_geometry_ranges(self):
+        poses = generate_stratified_dimer_poses("CO", candidate_count=16, seed=7)
+        distances = {pose["target_geometry"]["h_bond_distance_angstrom"] for pose in poses}
+        angles = {pose["target_geometry"]["donor_h_acceptor_angle_degrees"] for pose in poses}
+        axis_rotations = {pose["target_geometry"]["axis_rotation_degrees"] for pose in poses}
+        self.assertEqual(len(poses), 16)
+        self.assertIn(1.6, distances)
+        self.assertIn(2.5, distances)
+        self.assertIn(120.0, angles)
+        self.assertIn(180.0, angles)
+        self.assertGreaterEqual(len(axis_rotations), 4)
+        self.assertEqual(
+            [pose["target_geometry"] for pose in poses],
+            [pose["target_geometry"] for pose in generate_stratified_dimer_poses("CO", candidate_count=16, seed=7)],
+        )
+
+    def test_small_protic_molecules_enable_bounded_trimers(self):
+        methanol = dimer_sampling_plan("CO", phase="liquid", charge=0, multiplicity=1)
+        hexane = dimer_sampling_plan("CCCCCC", phase="liquid", charge=0, multiplicity=1)
+        self.assertTrue(methanol["trimer_eligible"])
+        self.assertEqual(methanol["trimer_atom_count"], 18)
+        self.assertFalse(hexane["trimer_eligible"])
+
+    def test_trimer_poses_include_linear_and_cyclic_networks(self):
+        poses = generate_stratified_trimer_poses("CO", candidate_count=8, seed=9)
+        self.assertEqual(len(poses), 8)
+        self.assertIn("linear_trimer", {pose["topology"] for pose in poses})
+        self.assertIn("cyclic_trimer", {pose["topology"] for pose in poses})
+        self.assertTrue(all(pose["cluster_size"] == 3 for pose in poses))
+        self.assertTrue(all(len(pose["symbols"]) == 18 for pose in poses))
+        self.assertTrue(all(len(pose["interactions"]) >= 2 for pose in poses))
+
+    def test_trimer_xcontrol_contains_every_hydrogen_bond_restraint(self):
+        pose = generate_stratified_trimer_poses("CO", candidate_count=2)[0]
+        control = _xcontrol_text(pose, 0.05)
+        self.assertEqual(control.count("distance:"), len(pose["interactions"]))
+        self.assertEqual(control.count("angle:"), len(pose["interactions"]))
+
+    def test_mixed_environment_selection_preserves_cluster_topologies(self):
+        poses = generate_stratified_dimer_poses("CO", candidate_count=3, seed=5)
+        poses += generate_stratified_trimer_poses("CO", candidate_count=4, seed=6)
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            records = []
+            for index, pose in enumerate(poses):
+                xyz = folder / f"pose-{index}.xyz"
+                xyz.write_text("\n".join([
+                    str(len(pose["symbols"])), "pose",
+                    *(f"{symbol} {point[0]} {point[1]} {point[2]}" for symbol, point in zip(pose["symbols"], pose["coordinates"])),
+                    "",
+                ]))
+                targets = [item["target_geometry"] for item in pose["interactions"]]
+                records.append({
+                    "candidate_id": f"candidate-{index:03d}", "sampling_status": "retained",
+                    "optimized_xyz": str(xyz), "cluster_size": pose["cluster_size"],
+                    "topology": pose["topology"], "site_identity": pose["site_identity"],
+                    "molecule_atom_ranges": pose["molecule_atom_ranges"],
+                    "local_stretch_bonds": pose["local_stretch_bonds"],
+                    "relative_xtb_energy_kcal_mol": float(index),
+                    "environment_features": {
+                        "h_bond_distance_angstrom": float(np.mean([item["h_bond_distance_angstrom"] for item in targets])),
+                        "donor_h_acceptor_angle_degrees": float(np.mean([item["donor_h_acceptor_angle_degrees"] for item in targets])),
+                        "donor_acceptor_distance_angstrom": 2.8,
+                        "intermolecular_orientation_degrees": float(index * 30),
+                        "heavy_atom_rmsd_angstrom": 0.1 * index,
+                    },
+                })
+            _, manifest = select_xtb_environment_representatives(records, folder, representative_count=4)
+            selected = json.loads(manifest.read_text())["conformers"]
+        topologies = {item["topology"] for item in selected}
+        self.assertIn("dimer", topologies)
+        self.assertIn("linear_trimer", topologies)
+        self.assertIn("cyclic_trimer", topologies)
+
+    def test_target_local_stretch_assignment_is_atom_count_independent(self):
+        coordinates = np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [4.0, 0.0, 0.0]])
+        vectors = np.zeros((9, 3, 3))
+        vectors[8, 0, 0] = -1.0
+        vectors[8, 1, 0] = 1.0
+        modes = NormalModeSet(
+            np.asarray([0.0] * 8 + [3400.0]), vectors, ("O", "H", "C"), coordinates,
+        )
+        assignments = local_stretch_mode_assignments(modes, [{
+            "heavy_atom": 0, "hydrogen_atom": 1, "bond_class": "O-H:0-1", "molecule_index": 0,
+        }])
+        self.assertEqual(assignments[0]["mode"], 8)
+        self.assertGreater(assignments[0]["local_stretch_projection"], 0.9)
+
+    def test_local_stretches_are_classified_by_molecular_hbond_role(self):
+        bonds = [
+            {"heavy_atom": 0, "hydrogen_atom": 1, "molecule_index": 0, "bond_class": "O-H"},
+            {"heavy_atom": 2, "hydrogen_atom": 3, "molecule_index": 1, "bond_class": "O-H"},
+        ]
+        classified = classify_local_stretch_bonds(bonds, [{
+            "donor_atom": 2, "donor_hydrogen": 3, "acceptor_atom": 0,
+        }], 2)
+        self.assertEqual(classified[0]["coordination_class"], "acceptor_only")
+        self.assertEqual(classified[0]["spectral_band_class"], "non_donating_oh")
+        self.assertEqual(classified[1]["coordination_class"], "donor_only")
+        self.assertEqual(classified[1]["spectral_band_class"], "hydrogen_bonded_oh")
+
+    def test_xtb_sampling_defaults_do_not_assign_liquid_populations(self):
+        self.assertEqual(xtb_sampling_defaults("auto")["candidate_count"], 40)
+        self.assertEqual(xtb_sampling_defaults("balanced")["candidate_count"], 75)
+        self.assertEqual(xtb_sampling_defaults("auto")["population_model"], "not_assigned")
+
+    def test_restrained_xtb_candidate_is_one_based_and_resumable(self):
+        pose = generate_stratified_dimer_poses("CO", candidate_count=1)[0]
+        fake_script = """#!/usr/bin/env python3
+import json, shutil, sys
+if '--version' in sys.argv:
+    print('xtb version 6.7.1')
+    raise SystemExit(0)
+shutil.copyfile(sys.argv[1], 'xtbopt.xyz')
+with open('xtbout.json', 'w') as handle:
+    json.dump({'total energy': -16.5}, handle)
+print('TOTAL ENERGY -16.500000 Eh')
+print('normal termination of xtb')
+"""
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            executable = folder / "xtb"
+            executable.write_text(fake_script)
+            executable.chmod(0o755)
+            candidate_dir = folder / "candidate"
+            record = run_xtb_candidate(
+                pose, candidate_dir, executable=str(executable), executable_version="6.7.1",
+            )
+            xcontrol = (candidate_dir / "xcontrol.inp").read_text()
+            expected_distance = f"distance: {pose['donor_hydrogen'] + 1},{pose['acceptor_atom'] + 1},"
+            with patch("storca.xtb_sampling.subprocess.run", side_effect=AssertionError("reran xTB")):
+                reused = run_xtb_candidate(
+                    pose, candidate_dir, executable=str(executable), executable_version="6.7.1",
+                )
+        self.assertEqual(record["sampling_status"], "retained")
+        self.assertIn(expected_distance, xcontrol)
+        self.assertEqual(reused, record)
+        self.assertIsNone(record["population_weight"])
+
+    def test_xtb_environment_sampling_writes_coverage_not_population_manifest(self):
+        pose = generate_stratified_dimer_poses("CO", candidate_count=1)[0]
+        fake_script = """#!/usr/bin/env python3
+import json, shutil, sys
+if '--version' in sys.argv:
+    print('xtb version 6.7.1')
+    raise SystemExit(0)
+shutil.copyfile(sys.argv[1], 'xtbopt.xyz')
+with open('xtbout.json', 'w') as handle:
+    json.dump({'total energy': -16.5}, handle)
+print('normal termination of xtb')
+"""
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            executable = folder / "xtb"
+            executable.write_text(fake_script)
+            executable.chmod(0o755)
+            atom_count = pose["monomer_atom_count"]
+            monomer_xyz = folder / "monomer.xyz"
+            monomer_xyz.write_text("\n".join([
+                str(atom_count), "monomer",
+                *(
+                    f"{symbol} {position[0]} {position[1]} {position[2]}"
+                    for symbol, position in zip(
+                        pose["symbols"][:atom_count], pose["coordinates"][:atom_count],
+                    )
+                ), "",
+            ]))
+            records, manifest = sample_xtb_dimer_environments(
+                "CO", folder, fidelity="auto", monomer_xyz=monomer_xyz,
+                candidate_count=4, executable=str(executable),
+            )
+            report = json.loads(manifest.read_text())
+        self.assertEqual(len(records), 4)
+        self.assertEqual(report["sampling"]["candidate_summary"]["retained"], 4)
+        self.assertFalse(report["sampling"]["population_model"]["vacuum_xtb_energies_used_as_liquid_populations"])
+        self.assertTrue(all(record["population_weight"] is None for record in records))
+
+    def test_environment_first_orca_budget_reserves_representatives(self):
+        auto = allocate_orca_budget(
+            fidelity="auto", max_conformers=10, max_environments=7,
+            max_orca_jobs=12, environment_eligible=True,
+        )
+        balanced = allocate_orca_budget(
+            fidelity="balanced", max_conformers=10, max_environments=7,
+            max_orca_jobs=12, environment_eligible=True,
+        )
+        constrained = allocate_orca_budget(
+            fidelity="auto", max_conformers=10, max_environments=7,
+            max_orca_jobs=3, environment_eligible=True,
+        )
+        self.assertEqual((auto["maximum_monomer_jobs"], auto["reserved_environment_jobs"]), (8, 4))
+        self.assertEqual((balanced["maximum_monomer_jobs"], balanced["reserved_environment_jobs"]), (6, 6))
+        self.assertEqual((constrained["maximum_monomer_jobs"], constrained["reserved_environment_jobs"]), (1, 2))
+        self.assertFalse(constrained["minimum_environment_gate_reachable"])
+
+    def test_heavy_atom_rmsd_is_rotation_and_translation_invariant(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            left = folder / "left.xyz"
+            right = folder / "right.xyz"
+            coordinates = np.array([[0.0, 0.0, 0.0], [1.2, 0.1, 0.0], [0.1, 1.0, 0.2]])
+            rotation = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+            transformed = coordinates @ rotation.T + np.array([4.0, -2.0, 1.5])
+            left.write_text("3\nleft\n" + "\n".join(
+                f"C {point[0]} {point[1]} {point[2]}" for point in coordinates
+            ) + "\n")
+            right.write_text("3\nright\n" + "\n".join(
+                f"C {point[0]} {point[1]} {point[2]}" for point in transformed
+            ) + "\n")
+            rmsd = aligned_heavy_atom_rmsd(left, right)
+        self.assertLess(rmsd, 1e-10)
+
+    def test_xtb_diversity_selection_exports_equal_weight_association_classes(self):
+        pose = generate_stratified_dimer_poses("CO", candidate_count=1)[0]
+        fake_script = """#!/usr/bin/env python3
+import json, shutil, sys
+if '--version' in sys.argv:
+    print('xtb version 6.7.1')
+    raise SystemExit(0)
+shutil.copyfile(sys.argv[1], 'xtbopt.xyz')
+with open('xtbout.json', 'w') as handle:
+    json.dump({'total energy': -16.5}, handle)
+print('normal termination of xtb')
+"""
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            executable = folder / "xtb"
+            executable.write_text(fake_script)
+            executable.chmod(0o755)
+            atom_count = pose["monomer_atom_count"]
+            monomer_xyz = folder / "monomer.xyz"
+            monomer_xyz.write_text("\n".join([
+                str(atom_count), "monomer",
+                *(
+                    f"{symbol} {position[0]} {position[1]} {position[2]}"
+                    for symbol, position in zip(
+                        pose["symbols"][:atom_count], pose["coordinates"][:atom_count],
+                    )
+                ), "",
+            ]))
+            records, _ = sample_xtb_dimer_environments(
+                "CO", folder, fidelity="auto", monomer_xyz=monomer_xyz,
+                candidate_count=18, executable=str(executable),
+            )
+            paths, manifest = select_xtb_environment_representatives(
+                records, folder, representative_count=4,
+            )
+            selection = json.loads(manifest.read_text())
+            eligible = [record for record in records if record["sampling_status"] == "retained"]
+            matrix, _ = pairwise_environment_distances(eligible)
+        entries = selection["conformers"]
+        self.assertEqual(len(paths), 4)
+        self.assertTrue(np.allclose(matrix, matrix.T))
+        self.assertTrue(np.allclose(np.diag(matrix), 0.0))
+        self.assertEqual({entry["association_class"] for entry in entries}, {"strong", "intermediate", "weak"})
+        self.assertTrue(all(entry["population_weight"] == 0.25 for entry in entries))
+        self.assertTrue(all(entry["geometry_cluster_id"] for entry in entries))
+
+    def test_explicit_environment_weights_override_electronic_energies(self):
+        records = [
+            {"index": 1, "energy": -200.0, "temperature": 298.15,
+             "population_weight": 0.5,
+             "ir_modes": [{"mode": 1, "freq": 1000.0, "intensity": 10.0}]},
+            {"index": 2, "energy": -100.0, "temperature": 298.15,
+             "population_weight": 0.5,
+             "ir_modes": [{"mode": 1, "freq": 1100.0, "intensity": 10.0}]},
+        ]
+        _, _, successful = build_ir_spectrum(records, scale_factor=1.0)
+        self.assertEqual([record["weight"] for record in successful], [0.5, 0.5])
+
+    def test_environment_snapshot_frequency_skips_orca_optimization(self):
+        def fake_create(xyz, charge, multiplicity, *, opt=False, freq=False, label, **kwargs):
+            path = Path(xyz).parent / f"{label}.inp"
+            path.write_text("input\n")
+            calls.append({"opt": opt, "freq": freq, "label": label})
+            return path
+
+        def fake_run(input_path):
+            output = Path(input_path).with_suffix(".out")
+            output.write_text("ORCA TERMINATED NORMALLY\n")
+            return {"out": output}
+
+        calls = []
+        with tempfile.TemporaryDirectory() as temp, patch(
+            "storca.spectrum.create_orca_input", side_effect=fake_create,
+        ), patch("storca.spectrum.run_orca", side_effect=fake_run), patch(
+            "storca.spectrum.parse_orca_energy", return_value=-50.0,
+        ), patch("storca.spectrum.frequency_stability_check", return_value={"IsMinimum": False}), patch(
+            "storca.spectrum.parse_orca_ir",
+            return_value=[{"mode": 1, "freq": 1000.0, "intensity": 10.0}],
+        ), patch("storca.spectrum.write_spectrum_plot", side_effect=lambda path, *args, **kwargs: Path(path)):
+            folder = Path(temp)
+            xyz = folder / "environment.xyz"
+            xyz.write_text("2\nenvironment\nH 0 0 0\nO 0 0 1.7\n")
+            orca_dir = folder / "orca"
+            orca_dir.mkdir()
+            (orca_dir / "selected-conformers.json").write_text(json.dumps({
+                "conformers": [{
+                    "selected_position": 1,
+                    "population_weight": 1.0,
+                    "population_model": "stratified_equal_representative_weights",
+                    "geometry_cluster_id": "environment-cluster-001",
+                    "independent_environment_id": "environment-cluster-001",
+                    "environment_features": {"geometry_cluster_id": "environment-cluster-001"},
+                }],
+            }))
+            result = run_ir_spectrum(
+                [xyz], orca_dir, geometry_role="environment_snapshot",
+                spectrum_model="raw", spectrum_style="relative",
+            )
+        self.assertEqual(calls, [{"opt": False, "freq": True, "label": "freq"}])
+        self.assertNotIn("error", result["conformers"][0])
+        self.assertEqual(result["conformers"][0]["geometry_role"], "environment_snapshot")
+        self.assertEqual(result["conformers"][0]["geometry_cluster_id"], "environment-cluster-001")
+        self.assertEqual(result["conformers"][0]["population_weight"], 1.0)
+
+    def test_self_dimer_intensities_are_normalized_per_molecule(self):
+        records = [{"ir_modes": [{"mode": 1, "freq": 1000.0, "intensity": 20.0}]}]
+        normalized = normalize_self_dimer_records(records)
+        self.assertEqual(normalized[0]["ir_modes"][0]["intensity"], 10.0)
+        self.assertEqual(records[0]["ir_modes"][0]["intensity"], 20.0)
+
+    def test_mixed_cluster_intensities_use_cluster_size_divisor(self):
+        records = [
+            {"cluster_size": 2, "topology": "dimer", "ir_modes": [{"mode": 1, "freq": 1000.0, "intensity": 30.0}]},
+            {"cluster_size": 3, "topology": "linear_trimer", "ir_modes": [{"mode": 1, "freq": 1000.0, "intensity": 30.0}]},
+        ]
+        normalized = normalize_environment_cluster_records(records)
+        self.assertEqual([item["ir_modes"][0]["intensity"] for item in normalized], [15.0, 10.0])
+        self.assertEqual([item["intensity_normalization_divisor"] for item in normalized], [2, 3])
+
+    def test_experimental_profile_resolves_phase_defaults_and_rejects_bad_geometry(self):
+        profile = resolve_experimental_profile(
+            phase="solution", measurement="auto", instrument_resolution_cm_1=4.0,
+            apodization="happ-genzel", residual_fwhm_cm_1=None,
+        )
+        self.assertEqual(profile.measurement, "transmission")
+        self.assertEqual(profile.residual_fwhm_cm_1, 4.0)
+        with self.assertRaisesRegex(ValueError, "incompatible"):
+            resolve_experimental_profile(
+                phase="gas", measurement="atr", instrument_resolution_cm_1=4.0,
+                apodization="gaussian", residual_fwhm_cm_1=None,
+            )
+
+    def test_atr_measurement_response_changes_relative_band_strengths(self):
+        grid = np.arange(500.0, 3501.0, 1.0)
+        absorption = np.zeros_like(grid)
+        absorption[500] = 1.0   # 1000 cm-1
+        absorption[2500] = 1.0  # 3000 cm-1
+        profile = resolve_experimental_profile(
+            phase="liquid", measurement="atr", instrument_resolution_cm_1=4.0,
+            apodization="gaussian", residual_fwhm_cm_1=2.0,
+        )
+        measured = apply_measurement_response(grid, absorption, profile=profile)
+        self.assertGreater(measured[500], measured[2500] * 2.5)
+        self.assertAlmostEqual(float(measured.sum()), 8.0 / 3.0, places=5)
+
+    def test_experimental_artifacts_keep_raw_ensemble_and_measured_outputs(self):
+        records = [
+            {"index": 1, "energy": -100.0, "temperature": 298.15,
+             "ir_modes": [{"mode": 1, "freq": 1000.0, "intensity": 10.0}]},
+            {"index": 2, "energy": -100.0, "temperature": 298.15,
+             "ir_modes": [{"mode": 1, "freq": 1020.0, "intensity": 10.0}]},
+        ]
+        with tempfile.TemporaryDirectory() as temp, patch(
+            "storca.spectrum.write_spectrum_plot", side_effect=lambda path, *args, **kwargs: Path(path)
+        ):
+            artifacts = _write_ir_artifacts(
+                records, Path(temp), scale_factor=1.0, fwhm=15.0,
+                spectrum_style="relative", max_absorbance=1.0,
+                spectrum_model="experimental", practical_smiles=None,
+                phase="liquid", measurement="atr", instrument_resolution=4.0,
+                apodization="gaussian", residual_fwhm=3.0,
+            )
+            self.assertTrue(Path(artifacts["raw_spectrum_csv"]).is_file())
+            self.assertTrue(Path(artifacts["ensemble_spectrum_csv"]).is_file())
+            self.assertTrue(Path(artifacts["spectrum_csv"]).is_file())
+            report = json.loads(Path(artifacts["ensemble_band_statistics"]).read_text())
+        self.assertEqual(report["bands"][0]["conformers"], 2)
+        self.assertEqual(artifacts["experimental_profile"]["measurement"], "atr")
+
+    def test_dimer_environment_retains_monomer_and_uses_per_molecule_spectrum(self):
+        monomer = [{"index": 1, "energy": -100.0, "temperature": 298.15,
+                    "ir_modes": [{"mode": 1, "freq": 1000.0, "intensity": 10.0}]}]
+        dimers = [{"index": 1, "energy": -200.0, "temperature": 298.15,
+                   "ir_modes": [{"mode": 1, "freq": 950.0, "intensity": 20.0}]}]
+        with tempfile.TemporaryDirectory() as temp, patch(
+            "storca.spectrum.write_spectrum_plot",
+            side_effect=lambda path, *args, **kwargs: Path(path),
+        ):
+            folder = Path(temp)
+            monomer_artifacts = _write_ir_artifacts(
+                monomer, folder, scale_factor=1.0, fwhm=15.0,
+                spectrum_style="relative", max_absorbance=1.0,
+                spectrum_model="experimental", practical_smiles=None,
+                phase="liquid", measurement="atr", instrument_resolution=4.0,
+                apodization="gaussian", residual_fwhm=3.0,
+            )
+            (folder / "environment-sampling.json").write_text(json.dumps({
+                "schema_version": 2,
+                "sampling": {"candidate_summary": {"retained": 1}},
+            }))
+            result = assemble_self_dimer_environment(
+                monomer_artifacts, dimers, folder,
+                scale_factor=1.0, fwhm=15.0, spectrum_style="relative",
+                max_absorbance=1.0, phase="liquid", measurement="atr",
+                instrument_resolution=4.0, apodization="gaussian", residual_fwhm=3.0,
+            )
+            retained = folder / "spectrum_monomer.csv"
+            retained_exists = retained.is_file()
+            measured = np.loadtxt(result["ensemble_spectrum_csv"], delimiter=",", skiprows=1)
+            environment_sampling = json.loads((folder / "environment-sampling.json").read_text())
+        self.assertTrue(retained_exists)
+        self.assertAlmostEqual(measured[np.argmax(measured[:, 1]), 0], 950.0)
+        self.assertEqual(result["conformers"][0]["ir_modes"][0]["intensity"], 10.0)
+        self.assertEqual(result["experimental_profile"]["environment_source"],
+                         "sampled_neutral_self_dimer_configurations")
+        self.assertEqual(environment_sampling["summary"]["width_status"],
+                         "insufficient_environment_sampling")
+        self.assertEqual(environment_sampling["summary"]["calculated_environment_fwhm_cm-1"], 0.0)
+        self.assertEqual(environment_sampling["summary"]["display_width_source"],
+                         "residual_plus_instrument")
+        self.assertEqual(environment_sampling["bands"][0]["calculated_environment_fwhm_cm-1"], 0.0)
+        self.assertEqual(environment_sampling["bands"][0]["display_width_source"],
+                         "residual_plus_instrument")
+        self.assertEqual(environment_sampling["sampling"]["candidate_summary"]["retained"], 1)
+        self.assertIn("width_sufficiency", environment_sampling)
+
     def test_relative_spectrum_is_unit_peak_and_rejects_nonfinite_values(self):
         values, label = format_spectrum(np.array([0.0, 2.0, 4.0]), style="relative")
         self.assertEqual(label, "relative_intensity")
@@ -581,6 +1277,31 @@ class FoundationTests(unittest.TestCase):
         self.assertEqual(kwargs["spectrum_model"], "practical")
         self.assertEqual(kwargs["temperature"], 310.0)
 
+    @patch("storca.xtb_sampling.sample_xtb_dimer_environments")
+    @patch("storca.spectrum.run_ir_spectrum")
+    def test_spectrum_resume_continues_planned_xtb_sampling(self, run_ir, sample_xtb):
+        run_ir.return_value = {"spectrum_csv": Path("spectrum.csv")}
+        sample_xtb.return_value = ([], Path("environment-sampling.json"))
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            (folder / "selected-conformers").mkdir()
+            selected = folder / "selected-conformers" / "conf.xyz"
+            selected.write_text("1\ntest\nH 0 0 0\n")
+            (folder / "metadata.json").write_text(json.dumps({
+                "charge": 0, "multiplicity": 1, "spectrum_model": "experimental",
+                "smiles": "CO", "fidelity": "auto",
+            }))
+            (folder / "spectrum-plan.json").write_text(json.dumps({
+                "smiles": "CO",
+                "xtb_environment_sampling": {
+                    "requested": True, "fidelity": "auto", "candidate_count": 40,
+                },
+            }))
+            resume_ir_spectrum(folder)
+        self.assertEqual(sample_xtb.call_count, 1)
+        self.assertEqual(sample_xtb.call_args.args[0], "CO")
+        self.assertEqual(sample_xtb.call_args.kwargs["monomer_xyz"], selected)
+
     def test_spectrum_resume_rejects_incompatible_completed_cache(self):
         with tempfile.TemporaryDirectory() as temp:
             folder = Path(temp)
@@ -625,6 +1346,32 @@ class FoundationTests(unittest.TestCase):
             executable.chmod(0o755)
             with patch.dict("os.environ", {"STORCA_ORCA_BIN": str(executable)}):
                 self.assertEqual(find_orca(), str(executable.resolve()))
+
+    def test_xtb_is_discovered_beside_active_python_without_path_activation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            environment_bin = Path(temp) / "bin"
+            environment_bin.mkdir()
+            python = environment_bin / "python"
+            python.write_text("#!/bin/sh\n")
+            python.chmod(0o755)
+            xtb = environment_bin / "xtb"
+            xtb.write_text("#!/bin/sh\n")
+            xtb.chmod(0o755)
+            with patch("src.orca_runner.sys.executable", str(python)), \
+                    patch("src.orca_runner.shutil.which", return_value=None), \
+                    patch.dict("os.environ", {}, clear=True):
+                self.assertEqual(find_xtb(), str(xtb.resolve()))
+
+    def test_gnome_orca_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            executable = Path(temp) / "orca"
+            executable.write_text(
+                '#!/usr/bin/python3\nimport gi\ngi.require_version("Atspi", "2.0")\nfrom orca import settings\n'
+            )
+            executable.chmod(0o755)
+            with patch.dict("os.environ", {"STORCA_ORCA_BIN": str(executable)}):
+                with self.assertRaisesRegex(RuntimeError, "GNOME Orca"):
+                    find_orca()
 
     def test_rmg_input_records_requested_conditions(self):
         with tempfile.TemporaryDirectory() as temp:

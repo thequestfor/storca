@@ -4,17 +4,26 @@ STORCA is a small, reproducible workflow for ORCA geometry optimizations and
 vibrational frequency calculations. Each calculation writes to its own run
 directory rather than cluttering the repository root.
 
+The staged plan for advancing from harmonic calculations to condition-matched
+experimental-spectrum predictions is documented in [ROADMAP.md](ROADMAP.md).
+
 ## Quick start
 
-Install the package in editable mode, then check prerequisites:
+Create an isolated Python environment, install the package, then check
+prerequisites:
 
 ```bash
-python -m pip install -e .
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e '.[chemistry]'
 storca doctor
 ```
 
 `doctor` checks whether ORCA, xTB, Open Babel, RMG, RDKit, and the Python Open
-Babel binding are discoverable in the active environment.
+Babel binding are discoverable in the active environment. On Debian/Ubuntu,
+`/usr/bin/orca` may be the unrelated GNOME screen reader; it is not the ORCA
+quantum-chemistry program. Obtain ORCA from FACCTs, then set
+`STORCA_ORCA_BIN` to its executable path.
 
 For a machine-specific ORCA location, set `STORCA_ORCA_BIN` to the executable
 path instead of changing project code.
@@ -144,7 +153,9 @@ storca spectrum-resume runs/spectrum-YYYYMMDDTHHMMSSZ --cores 4
 Resume and finalize inherit the original method, charge, spin, spectrum model,
 temperature, scaling, and display settings. Per-conformer geometry/electronic
 signatures prevent completed jobs from being reused under an incompatible
-contract.
+contract. Once `experimental-condition.json` exists, resume/finalize will not
+mutate its sample or measurement settings in place; create a new run for a
+different measurement contract.
 
 ## Spectrum benchmarking
 
@@ -207,6 +218,11 @@ The selected factor minimizes prominent-band position error on the training
 set, with correlation only as a tiebreaker. Accept it only when the untouched
 holdout metrics also improve and the reference conditions match the intended
 use; STORCA never changes a method profile automatically.
+The benchmark manifest is schema v2: numerical references are content-hashed,
+carry provenance and condition metadata, and declare a dataset partition. The
+current heterogeneous references remain `development_unassigned`; they cannot
+support a locked held-out claim until condition-complete partitions are
+declared before calibration.
 
 ## Practical IR display
 
@@ -219,15 +235,218 @@ storca spectrum --smiles 'O1CC(O)OCC1O' --spectrum-model practical --cores 4
 ```
 
 The calculated spectrum remains in `spectrum_raw.csv` and `spectrum_raw.png`.
-The displayed `spectrum.csv` records the `ambient-organic-v0.2` rules in
-`metadata.json`. These rules broaden and, for hydrogen-bond-capable O-H/N-H
-regions, shift calculated modes into a practical condensed-organic envelope.
-At present, this profile has retained only its flexible-molecule fingerprint
-rule. The initial broad O-H envelope helped a KBr-disc benchmark but degraded
-an ethanol reference, so it is not applied without an explicit sample-aware
-model. These rules are an empirical display calibration—not a solvent, crystal, or
+The displayed `spectrum.csv` records the `ambient-organic-v0.3` rules in
+`metadata.json`. At present, this profile has retained only its
+flexible-molecule fingerprint rule. The initial broad O-H envelope helped a
+KBr-disc benchmark but degraded an ethanol reference, so it is not applied
+without an explicit sample-aware model. These rules are an empirical display
+calibration—not a solvent, crystal, or
 first-principles linewidth calculation—and will be retained only when they
 improve held-out benchmarks.
+
+## Calculation-first experimental FTIR
+
+Use the experimental model when the desired output is a simulated measurement
+rather than a uniformly broadened harmonic trace:
+
+```bash
+storca spectrum --smiles CCO --spectrum-model experimental \
+  --phase liquid --measurement atr --instrument-resolution 4 \
+  --apodization happ-genzel --pressure 1 \
+  --solvent neat --atr-crystal diamond --fidelity auto --cores 4
+```
+
+To permit the validated projected-local-mode fallback for nonstationary
+environment representatives, supply a separate process allowance, for example
+`--local-mode-orca-invocations 36`. Zero is the default and performs no
+additional ORCA work. The planner spends four gradient invocations per selected
+bond and starts a mode class only when it can cover three distinct
+representatives; the persistent run-level ledger is a hard cap.
+
+Extend a completed cheap environment ensemble without repeating its retained
+calculations using:
+
+```bash
+storca spectrum-extend-environments runs/spectrum-YYYYMMDDTHHMMSSZ \
+  --maximum-candidates 100 --batch-size 20 --cores 4
+```
+
+Extension rounds use independent deterministic seeds and balanced dimer,
+linear-trimer, cyclic-trimer, strong, intermediate, and weak strata. Numerical
+batch stability and bootstrap precision are separate gates: stable centers and
+widths are not labelled converged while their 95% intervals remain too broad.
+
+The resolved sample and measurement settings are retained in the versioned
+`experimental-condition.json` contract. Optional CLI fields record composition,
+concentration, transmission path length, ATR incidence angle, and refractive
+index when those values are known. Missing values remain explicitly unknown.
+
+This model uses the frequency distribution calculated across the
+Boltzmann-weighted conformer ensemble as physical inhomogeneous broadening.
+With `--fidelity auto` or `balanced`, a neutral closed-shell neat liquid or
+solid containing both donor and acceptor sites receives deterministic,
+coverage-oriented dimer sampling. Small protic molecules (at most four heavy
+atoms and 36 atoms in the trimer) additionally receive linear donor-acceptor
+chains and cyclic trimers where geometrically plausible. The `auto` and
+`balanced` tiers propose 40 and 75 total poses respectively across 1.6--2.5 Angstrom H--acceptor distances,
+120--180 degree donor--H--acceptor angles, hydrogen-bond-axis rotations, and
+alternative framework orientations. Each pose receives an isolated, weakly
+restrained GFN2-xTB optimization with a content-hashed resume contract. This
+is followed by a separately cached, unrestrained GFN2-xTB numerical Hessian at
+the retained snapshot; the sampling restraints are never included in the force
+constants. The resulting local X--H frequencies are included in the diversity
+feature space. This inexpensive ensemble consumes no ORCA budget and is not assigned liquid
+population weights. Near-duplicates are removed using interaction geometry and
+aligned heavy-atom RMSD. A coverage-constrained acquisition controller then
+selects four (`auto`) or six (`balanced`) representatives. It first targets
+three independent representatives for every prevalent local mode/coordination
+class, then spends remaining jobs on frequency, geometry, topology, and
+association diversity. After each ORCA batch, failed transfer classes are
+moved ahead of redundant pending representatives. Representatives receive equal stratum
+weights with an explicit warning that these are not liquid occupancies.
+
+Environment jobs are reserved before GOAT monomer jobs: the default 12-job cap
+allocates 8 monomers plus 4 environments for `auto`, or 6 plus 6 for
+`balanced`. ORCA evaluates a Hessian directly at each selected restrained-xTB
+geometry instead of performing an unconstrained optimization that could
+collapse the environments into one minimum. These are recorded as snapshot
+Hessians, not unconstrained DFT stationary points. A separate
+environment-preserving DFT refinement contract constrains interaction geometry
+during optimization and then evaluates an unrestrained gradient. Full-Hessian
+use is permitted only when both gradient gates pass.
+
+Normal modes across equal-sized configurations are matched primarily by
+internal-coordinate fingerprints containing stretch, bend, torsion, and ring
+participation. Geometry-aligned Cartesian displacement overlap remains a
+fallback. Mixed dimer/trimer X--H bands are followed through target-local
+bond-stretch projections, avoiding an invalid comparison between differently
+sized Hessian vectors. The model then
+applies a small, recorded residual linewidth, the selected measurement
+geometry, and a finite-resolution FTIR instrument line shape. ATR
+uses a first-order wavelength-dependent penetration-depth response;
+transmission and gas-cell modes do not apply it. The `happ-genzel` choice is a
+positive central-lobe approximation, not an emulation of particular instrument
+firmware.
+
+A network frequency distribution is exposed as a calculated environment
+width only when each band has at least three independent geometry clusters,
+nonzero frequency variance, effective sample size of at least 2.5, documented
+hydrogen-bond geometry diversity, and normal-mode overlap of at least 0.45
+covering at least 80% of its population. These are versioned minimum-evidence
+thresholds, not a claim that three environments are a converged liquid model.
+If any requirement fails, that band's calculated environment FWHM is reported
+as zero with `width_status=insufficient_environment_sampling`. Its sampled
+frequencies remain in a diagnostic spectrum, while the displayed band is
+collapsed to its weighted center before residual and instrument response are
+applied.
+Local X--H observations are first grouped by independent geometry for
+effective-sample-size and diversity checks, so several oscillators in one
+trimer cannot inflate the number of environments. Hydrogen-bonded and
+non-donating X--H oscillators are evaluated as separate spectral band classes;
+free terminal modes are not averaged into the bonded-network center.
+ORCA representatives are evaluated in cumulative diversity-first batches:
+`2,3,4` for `auto` and `2,4,6` for `balanced`, capped by the selected and hard
+job budgets. After each batch STORCA compares important band centers, raw
+frequency-distribution FWHM values, integrated intensity, and a fixed 2 cm^-1
+absorption-strength spectrum. Convergence requires center changes below
+5 cm^-1, width changes below 10 cm^-1 or 10%, whole-spectrum cosine overlap
+above 0.98, adequate mode overlap, and no new significant band class for two
+consecutive comparisons. If the hard budget is reached first, a sufficient
+distribution remains visible but is labelled
+`width_status=environment_width_unconverged`; it is never reported as a
+converged environment width.
+
+After representative ORCA Hessians exist, STORCA pairs xTB and ORCA local X--H
+modes at the same geometries and tests an additive DFT correction by leaving
+each representative out in turn. Transfer requires at least three independent
+representatives per mode/coordination class, mode-character similarity of at
+least 0.50, at least 20% lower error than raw xTB, a high-frequency MAE no
+larger than 30 cm^-1, and no withheld error above 75 cm^-1. Out-of-domain or
+failed classes remain diagnostic; the representative ORCA spectrum stays the
+display basis. xTB intensities are not treated as DFT intensities, and transfer
+does not convert stratified geometry weights into liquid populations.
+
+The run keeps the layers separate:
+
+- `spectrum_raw.csv/png`: the original harmonic display using `--fwhm`.
+- `spectrum_ensemble.csv/png`: calculated conformer distribution with the
+  phase-default or user-supplied `--residual-fwhm`.
+- `spectrum_intrinsic.csv/png`: calculated absorption strength before ATR,
+  transmission, or finite-resolution instrument response.
+- `spectrum.csv/png`: the simulated measurement after geometry and instrument
+  response.
+- `experimental-condition.json`: immutable, versioned sample and measurement
+  metadata used to render and evaluate the spectrum.
+- `mode-character.json`: internal-coordinate character and matching confidence
+  for each retained band.
+- `ensemble-bands.json`: per-mode calculated mean, standard deviation, and
+  equivalent ensemble FWHM, effective sample size, sufficiency decision, and
+  mode-matching confidence.
+- `environment-sampling.json`: restrained-xTB sampling configuration,
+  candidate records, the explicit no-population warning, versioned sufficiency
+  thresholds, per-band decisions, failure reasons, and display-width policy.
+- `environment-convergence.json`: cumulative batch metrics, threshold results,
+  consecutive-pass count, manifest hash, budget state, and stop reason.
+- `environment-acquisition.json`: sampled mode-class prevalence, required and
+  completed DFT coverage, representative decisions, adaptive reorderings,
+  transfer feedback after each ORCA batch, and hard-budget stop state.
+- Snapshot-Hessian reliability records the material imaginary-mode count and
+  labels strongly nonstationary full Hessians as diagnostic-only. Target-local
+  X--H projections retain their own matching-confidence assessment.
+- `environment-geometries/`: per-candidate initial geometry, xTB restraint
+  input, calculation contract, output, optimized geometry, sampling record,
+  and an `xtb-frequency/` unrestrained snapshot-Hessian cache.
+- `xtb-snapshot-frequencies.json`: parsed xTB modes, local-mode assignments,
+  mode fingerprints, intensities, and imaginary-curvature diagnostics.
+- `frequency-transfer.json` and `frequency-transfer-validation.json`: paired
+  representative corrections, applicability distances, uncertainty estimates,
+  and leave-one-representative-out gates.
+- `frequency-transfer-convergence.json`: cumulative cheap-ensemble center,
+  width, intensity, and whole-spectrum convergence diagnostics under three
+  deterministic stratified orderings, with candidate bootstrap intervals.
+- `spectrum_xtb_environment.csv` and
+  `spectrum_dft_transferred_intrinsic.csv`: explicitly diagnostic raw-xTB and
+  validated/partially transferred local-mode ensembles.
+- `spectrum_hybrid_multifidelity_intrinsic.csv`: representative ORCA nonlocal
+  modes plus corrected xTB-snapshot local frequencies and representative-ORCA
+  class intensities. It remains diagnostic unless validation, convergence, and
+  complete local-intensity coverage all pass.
+- Representative `local-mode-finite-differences/` directories contain
+  center-of-mass-preserving bond displacements, ORCA gradient/dipole jobs, a
+  versioned calculation contract, `local-modes.json`, and an actual-process
+  `orca-invocations.json` hard-cap ledger. Two displacement sizes must agree
+  before a projected frequency can override a snapshot-Hessian local mode.
+- `spectrum_environment_sampled.csv/png`: the uncollapsed sampled environment
+  distribution retained for diagnosis even when it fails the display gate.
+- `clusters.json` and `clusters/`: selected xTB medoids, geometry-cluster and
+  equal-weight contracts, and their independent resumable ORCA snapshot
+  artifacts.
+- `spectrum_monomer*.csv/png`: the monomer-only result retained before a
+  successful network environment replaces the displayed spectrum.
+- `spectrum_dimer.csv`: the selected, per-molecule dimer ensemble.
+- `spectrum_network.csv`: the mixed, per-target-molecule dimer/trimer ensemble.
+
+Inspect the adaptive budget without running ORCA:
+
+```bash
+storca spectrum --smiles CCO --spectrum-model experimental \
+  --phase liquid --fidelity auto --max-orca-jobs 12 --dry-run
+```
+
+Use `--fidelity fast` to disable cluster work. `auto` activates the 40-pose xTB
+tier only for the eligible condition/interaction contract; `balanced` requests
+75 poses. Charged or open-shell clusters are not generated because their
+spin coupling and counterion environment are underspecified.
+
+Phase defaults for the residual linewidth are deliberately small: 1, 4, 6,
+and 8 cm^-1 for gas, solution, liquid, and solid respectively. Override them
+with `--residual-fwhm` when a condition-matched calibration supports doing so.
+The model does not add decorative noise or baselines. Restrained static neutral
+dimers/trimers and equal stratum weights are a geometry-coverage model, not exact bulk
+populations. Larger aggregation, explicit solvent configurations, anharmonic
+lifetimes, crystal packing, VPT2, larger-cluster convergence, and molecular dynamics
+remain unimplemented. Their absence is recorded rather than hidden by a large
+empirical FWHM.
 
 ## RMG stability screen
 
@@ -285,6 +504,11 @@ controlling kinetics passed ORCA/Arkane verification. An initial RMG `t95`, a
 photolysis integral, or a verified route without repaired propagation cannot
 stop the ladder. Later stages are recorded as not run, not safe:
 
+Cantera reaction-flux attribution is adaptively refined when its integrated
+target loss does not close against the propagated target inventory. A route is
+still withheld if the bounded refinement budget cannot satisfy the numerical
+closure gate.
+
 ```bash
 storca stability-ladder --smiles CCO --rmg-env rmg_env
 ```
@@ -341,6 +565,15 @@ explicit TS refinement, requires exactly one significant imaginary mode, and
 requires a bidirectional IRC to match the declared bound endpoints or separated
 fragment channels. The same IRC geometry sequence can be rendered as the
 decomposition animation.
+
+The declared ORCA charge and multiplicity constrain the combined system; they
+do not by themselves preserve fragment-local radical multiplicities after
+fragments are assembled. If a validated intermediate splits a route into an
+association or dissociation segment, STORCA therefore retains a
+fragment-spin-aware capture/recrossing or constrained-scan requirement instead
+of applying an unconstrained fixed-end NEB-TS calculation. A persistent NEB
+whose highest-energy image remains an endpoint is stopped early and retained as
+an unresolved path-quality result, never as a transition state or rate.
 
 If no saddle point is retained, a barrierless label requires a normally
 completed path with complete energies, endpoint agreement, and the same result

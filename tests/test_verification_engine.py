@@ -224,6 +224,32 @@ class VerificationEngineTests(unittest.TestCase):
             "deferred_unverified", "deferred_unverified",
         ])
 
+    def test_engine_defers_route_without_common_adiabatic_spin_surface(self):
+        initial = _model(weights=(10.0, 0.0), routes=[ROUTES[0]])["rmg_evidence"]
+        initial["candidate_routes"] = [ROUTES[0]]
+
+        def incompatible_spin_surface(route, workdir):
+            return {"route_verification": {
+                "status": "no_common_adiabatic_spin_surface",
+                "path_classification": "surface_unresolved",
+            }}
+
+        def should_not_run(*args):
+            raise AssertionError("No rate or rerun is allowed across incompatible spin surfaces")
+
+        with tempfile.TemporaryDirectory() as temp:
+            summary = run_verification_engine(
+                initial, CONTRACT, Path(temp), verify_route=incompatible_spin_surface,
+                build_rate=should_not_run, rerun_model=should_not_run,
+            )
+
+        self.assertEqual(summary["status"], "verification_incomplete")
+        self.assertIn("all_unverified_routes_deferred", summary["reason"])
+        self.assertEqual(
+            summary["deferred_unverified_routes"][0]["status"],
+            "no_common_adiabatic_spin_surface",
+        )
+
     def test_engine_backtracks_to_alternative_generated_intermediate_source(self):
         routes = [
             {

@@ -15,6 +15,7 @@
 !pyproject.toml
 !METHODS.md
 !LIMITATIONS.md
+!ROADMAP.md
 !examples/
 !examples/**
 !benchmarks/

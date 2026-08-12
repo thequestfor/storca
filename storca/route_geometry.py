@@ -540,15 +540,28 @@ def _extend_hydrogen_mapping(
         unmatched_by_right_parent.setdefault(products.hydrogen_parent.get(value), []).append(value)
     if len(unmatched_left) != len(unmatched_right):
         return {"status": "unbalanced_explicit_hydrogens", "valid": False}
-    # Multiple donor and acceptor centres define more than one chemically
-    # distinct proton-transfer correspondence.  Equivalent H atoms on one
-    # centre are safe to order deterministically; distinct centres are not.
-    if unmatched_left and (
-        len(unmatched_by_left_parent) > 1 or len(unmatched_by_right_parent) > 1
-    ):
+    # A transfer is chemically ambiguous only when the same isotope can be
+    # assigned between multiple distinct donor *and* acceptor centres.  When
+    # one side has a single centre, permutations on that centre are endpoint
+    # symmetry (for example 2 HNO -> N2O + H2O) and may be canonicalized.
+    ambiguous_isotopes = []
+    for isotope in sorted({reactants.isotopes[value] for value in unmatched_left}
+                          | {products.isotopes[value] for value in unmatched_right}):
+        donor_parents = {
+            reactants.hydrogen_parent.get(value)
+            for value in unmatched_left if reactants.isotopes[value] == isotope
+        }
+        acceptor_parents = {
+            products.hydrogen_parent.get(value)
+            for value in unmatched_right if products.isotopes[value] == isotope
+        }
+        if len(donor_parents) > 1 and len(acceptor_parents) > 1:
+            ambiguous_isotopes.append(isotope)
+    if ambiguous_isotopes:
         return {
             "status": "ambiguous_hydrogen_transfer_mapping",
             "valid": False,
+            "ambiguous_isotopes": ambiguous_isotopes,
             "reactant_donor_atom_indices": [
                 value for value in sorted(
                     unmatched_by_left_parent, key=lambda item: (-1 if item is None else item)
@@ -560,6 +573,9 @@ def _extend_hydrogen_mapping(
                 )
             ],
         }
+    symmetry_canonicalized = bool(unmatched_left) and (
+        len(unmatched_by_left_parent) > 1 or len(unmatched_by_right_parent) > 1
+    )
     for isotope in sorted({reactants.isotopes[value] for value in unmatched_left}
                           | {products.isotopes[value] for value in unmatched_right}):
         left_isotope = sorted(value for value in unmatched_left if reactants.isotopes[value] == isotope)
@@ -587,7 +603,18 @@ def _extend_hydrogen_mapping(
         for left, right in all_mapping.items()
     ):
         return {"status": "all_atom_element_mismatch", "valid": False}
-    return {"status": "resolved", "valid": True, "mapping": all_mapping, "hydrogen_transfers": transfers}
+    result = {"status": "resolved", "valid": True, "mapping": all_mapping, "hydrogen_transfers": transfers}
+    if symmetry_canonicalized:
+        result["hydrogen_symmetry_resolution"] = {
+            "status": "equivalent_hydrogen_permutations_canonicalized",
+            "reactant_donor_atom_indices": sorted(
+                unmatched_by_left_parent, key=lambda item: (-1 if item is None else item)
+            ),
+            "product_acceptor_atom_indices": sorted(
+                unmatched_by_right_parent, key=lambda item: (-1 if item is None else item)
+            ),
+        }
+    return result
 
 
 def _coupled_multiplicities(multiplicities: tuple[int, ...]) -> list[int]:
@@ -740,6 +767,8 @@ def resolve_route_atom_mapping(route: RouteSpec, *, max_search_states: int = 200
         "explicit_atom_count": len(reactants.elements),
         "hydrogen_transfers": extended["hydrogen_transfers"],
         "surface": surface,
+        **({"hydrogen_symmetry_resolution": extended["hydrogen_symmetry_resolution"]}
+           if "hydrogen_symmetry_resolution" in extended else {}),
         **{key: value for key, value in automatic_metadata.items() if key not in {"valid", "status", "source"}},
     }
 

@@ -51,6 +51,7 @@ _DEFERABLE_PATH_STATUSES = {
     "intermediate_detected_requires_segmented_verification",
     "irc_endpoint_validation_failed",
     "mapping_unresolved",
+    "no_common_adiabatic_spin_surface",
     "path_execution_failed",
     "stationary_point_validation_failed",
     "surface_unresolved",

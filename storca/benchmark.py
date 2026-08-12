@@ -45,6 +45,70 @@ def read_spectrum_csv(path: Path) -> tuple[np.ndarray, np.ndarray]:
     return x_values, y_values
 
 
+def _absorption_like(values: np.ndarray, convention: str) -> np.ndarray:
+    values = np.asarray(values, dtype=float)
+    if convention == "transmittance":
+        signal = float(np.max(values)) - values
+    else:
+        signal = values - float(np.min(values))
+    return np.maximum(signal, 0.0)
+
+
+def _shape_metrics(
+    x_values: np.ndarray, predicted_values: np.ndarray, reference_values: np.ndarray,
+    predicted_convention: str, reference_convention: str,
+) -> dict:
+    predicted = _absorption_like(predicted_values, predicted_convention)
+    reference = _absorption_like(reference_values, reference_convention)
+    predicted_norm = predicted / max(float(np.max(predicted)), 1e-300)
+    reference_norm = reference / max(float(np.max(reference)), 1e-300)
+    denominator = float(np.linalg.norm(predicted_norm) * np.linalg.norm(reference_norm))
+    cosine = None if denominator <= 0 else float(np.dot(predicted_norm, reference_norm) / denominator)
+
+    def moments(signal: np.ndarray) -> tuple[float | None, float | None]:
+        area = float(np.trapezoid(signal, x_values))
+        if area <= 0:
+            return None, None
+        center = float(np.trapezoid(signal * x_values, x_values) / area)
+        variance = float(np.trapezoid(signal * np.square(x_values - center), x_values) / area)
+        if variance <= 0:
+            return 0.0, 0.0
+        skew = float(
+            np.trapezoid(signal * np.power(x_values - center, 3), x_values)
+            / (area * variance ** 1.5)
+        )
+        return 2.0 * np.sqrt(2.0 * np.log(2.0)) * np.sqrt(variance), skew
+
+    predicted_width, predicted_asymmetry = moments(predicted_norm)
+    reference_width, reference_asymmetry = moments(reference_norm)
+    regions = []
+    for lower, upper in ((400.0, 1800.0), (1800.0, 2800.0), (2800.0, 4000.0)):
+        mask = (x_values >= lower) & (x_values <= upper)
+        if np.count_nonzero(mask) < 2:
+            continue
+        predicted_area = float(np.trapezoid(predicted_norm[mask], x_values[mask]))
+        reference_area = float(np.trapezoid(reference_norm[mask], x_values[mask]))
+        regions.append({
+            "range_cm-1": [lower, upper],
+            "predicted_normalized_area": predicted_area,
+            "reference_normalized_area": reference_area,
+            "area_error": predicted_area - reference_area,
+        })
+    return {
+        "whole_spectrum_cosine_overlap": cosine,
+        "equivalent_envelope_fwhm_cm-1": {
+            "predicted": predicted_width, "reference": reference_width,
+            "error": None if None in {predicted_width, reference_width} else predicted_width - reference_width,
+        },
+        "envelope_asymmetry": {
+            "predicted": predicted_asymmetry, "reference": reference_asymmetry,
+            "error": None if None in {predicted_asymmetry, reference_asymmetry}
+            else predicted_asymmetry - reference_asymmetry,
+        },
+        "integrated_regions": regions,
+    }
+
+
 def _metrics(predicted_values: np.ndarray, reference_values: np.ndarray) -> dict:
     """Return comparable shape and absolute-error metrics for two equal arrays."""
     if len(predicted_values) < 3:
@@ -113,10 +177,15 @@ def compare_spectra(
     interpolated = np.interp(x, px, py)
     reference_values = np.interp(x, rx, ry)
     raw = _metrics(interpolated, reference_values)
+    shape = _shape_metrics(
+        x, interpolated, reference_values,
+        predicted_convention["intensity"], reference_convention["intensity"],
+    )
     result = {
         "overlap_cm-1": [float(x.min()), float(x.max())],
         "points": int(len(x)),
         **raw,
+        **shape,
         "raw": raw,
         "shift_search_cm-1": {"window": float(shift_window), "step": float(shift_step)},
         "sampling": "uniform_common_wavenumber_grid",

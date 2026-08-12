@@ -1,11 +1,15 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "purpose": "Development-only raw harmonic IR method selection. References retain their original measurement metadata and are not treated as identical sample conditions.",
   "entries": [
     {
       "id": "acetic-anhydride-ccl4",
       "smiles": "CC(=O)OC(C)=O",
       "reference_spectrum": "acetic_anhydride_ccl4_transmittance.csv",
+      "reference_sha256": "9cad27e4eba493721c7b74b30fc4e193c1a4831f8396e44630cd13f789c80d77",
+      "partition": "development_unassigned",
+      "condition": {"phase": "solution", "temperature_K": null, "pressure_bar": null, "solvent": "CCl4", "measurement": {"geometry": "unspecified"}},
+      "provenance": {"metadata": "acetic_anhydride_ccl4_solution.json", "digitization": "calibrated trace from supplied SDBS-style image"},
       "metadata": "acetic_anhydride_ccl4_solution.json",
       "baseline_spectra": {"b3lyp-def2-svp": "../runs/acetic-anhydride-baseline-20260728T181406Z/spectrum.csv"}
     },
@@ -13,6 +17,10 @@
       "id": "glycolaldehyde-dimer-kbr",
       "smiles": "O1CC(O)OCC1O",
       "reference_spectrum": "glycolaldehyde_dimer_kbr_transmittance.csv",
+      "reference_sha256": "faceafd5cc2c4d9703ad62f6bcaa7d1038f789b654a9b0be6d295a9e19c79b99",
+      "partition": "development_unassigned",
+      "condition": {"phase": "solid", "temperature_K": null, "pressure_bar": null, "solvent": "KBr", "measurement": {"geometry": "transmission"}},
+      "provenance": {"metadata": "glycolaldehyde_dimer_kbr_disc.json", "digitization": "SDBS non-linear printed-axis trace"},
       "metadata": "glycolaldehyde_dimer_kbr_disc.json",
       "baseline_spectra": {"b3lyp-def2-svp": "../runs/glycolaldehyde-dimer-20260728T210911Z/spectrum_raw.csv"}
     },
@@ -20,6 +28,10 @@
       "id": "benzene-liquid-film",
       "smiles": "c1ccccc1",
       "reference_spectrum": "benzene_liquid_film_transmittance.csv",
+      "reference_sha256": "69f5f609611217d349541cfcccebd3f0df5f79418dd84edcb6c89fab0435ef89",
+      "partition": "development_unassigned",
+      "condition": {"phase": "liquid", "temperature_K": null, "pressure_bar": null, "solvent": "neat", "measurement": {"geometry": "transmission"}},
+      "provenance": {"metadata": "benzene_liquid_film.json", "digitization": "SDBS non-linear printed-axis trace"},
       "metadata": "benzene_liquid_film.json",
       "baseline_spectra": {
         "b3lyp-def2-svp": "../runs/benzene-practical-20260728T214344Z/spectrum_raw.csv",
@@ -31,6 +43,10 @@
       "id": "hexane-ccl4",
       "smiles": "CCCCCC",
       "reference_spectrum": "hexane_ccl4_transmittance.csv",
+      "reference_sha256": "926485e2ba13ff6148cdd70bf0235f9b6ee2110d02f5d04caf4091216b41df53",
+      "partition": "development_unassigned",
+      "condition": {"phase": "solution", "temperature_K": null, "pressure_bar": null, "solvent": "CCl4", "measurement": {"geometry": "transmission"}},
+      "provenance": {"metadata": "hexane_ccl4_solution.json", "digitization": "SDBS non-linear printed-axis trace"},
       "metadata": "hexane_ccl4_solution.json",
       "baseline_spectra": {"b3lyp-def2-svp": "../runs/hexane-practical-20260728T215244Z/spectrum_raw.csv"}
     },
@@ -38,6 +54,10 @@
       "id": "ethylamine-liquid-film",
       "smiles": "CCN",
       "reference_spectrum": "ethylamine_liquid_film_transmittance.csv",
+      "reference_sha256": "3ee9ba68d3e4eb92721508af51703b15e4f8a24c02f86d1447c32c242c7baefb",
+      "partition": "development_unassigned",
+      "condition": {"phase": "liquid", "temperature_K": null, "pressure_bar": null, "solvent": "neat", "measurement": {"geometry": "transmission"}},
+      "provenance": {"metadata": "ethylamine_liquid_film.json", "digitization": "SDBS non-linear printed-axis trace"},
       "metadata": "ethylamine_liquid_film.json",
       "baseline_spectra": {"b3lyp-def2-svp": "../runs/ethylamine-practical-20260728T221330Z/spectrum_raw.csv"}
     },
@@ -45,6 +65,10 @@
       "id": "ethanol-nist",
       "smiles": "CCO",
       "reference_spectrum": "ethanol_nist_transmittance.csv",
+      "reference_sha256": "70b54125b8294d484945bcd6dfbfbc1792025b1fdb9d5a0dc1cd4968cacd61d7",
+      "partition": "development_unassigned",
+      "condition": {"phase": "unspecified", "temperature_K": null, "pressure_bar": null, "solvent": null, "measurement": {"geometry": "unspecified"}},
+      "provenance": {"metadata": "ethanol_nist.json", "source": "NIST Chemistry WebBook", "digitization": "linear image calibration"},
       "metadata": "ethanol_nist.json",
       "baseline_spectra": {
         "b3lyp-def2-svp": "../runs/ethanol-practical-20260728T222650Z/spectrum_raw.csv",
@@ -55,6 +79,10 @@
       "id": "acetaldehyde-nist",
       "smiles": "CC=O",
       "reference_spectrum": "acetaldehyde_nist_transmittance.csv",
+      "reference_sha256": "1feed24f4b2307d2a859dea0bd585f082a7e8262a55cd14f3d6ee90a42863020",
+      "partition": "development_unassigned",
+      "condition": {"phase": "unspecified", "temperature_K": null, "pressure_bar": null, "solvent": null, "measurement": {"geometry": "unspecified"}},
+      "provenance": {"metadata": "acetaldehyde_nist.json", "source": "NIST Chemistry WebBook", "digitization": "linear image calibration"},
       "metadata": "acetaldehyde_nist.json",
       "baseline_spectra": {
         "b3lyp-def2-svp": "../runs/acetaldehyde-practical-20260728T223252Z/spectrum_raw.csv",
@@ -65,6 +93,10 @@
       "id": "dimethylamine-nist",
       "smiles": "CN(C)",
       "reference_spectrum": "dimethylamine_nist_transmittance.csv",
+      "reference_sha256": "11b25c995c5e3287e71b29bb6c24f183fff46eac8f32f65005374eaf85ecf935",
+      "partition": "development_unassigned",
+      "condition": {"phase": "unspecified", "temperature_K": null, "pressure_bar": null, "solvent": null, "measurement": {"geometry": "unspecified"}},
+      "provenance": {"metadata": "dimethylamine_nist.json", "source": "NIST Chemistry WebBook", "digitization": "linear image calibration"},
       "metadata": "dimethylamine_nist.json",
       "baseline_spectra": {"b3lyp-def2-svp": "../runs/dimethylamine-raw-20260728T224222Z/spectrum.csv"}
     }

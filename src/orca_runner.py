@@ -4,10 +4,26 @@ import re
 import signal
 import shutil
 import subprocess
+import sys
 import time
 import queue
 import threading
 from collections.abc import Callable
+
+
+def _is_gnome_orca(executable: Path) -> bool:
+    """Recognize the Ubuntu GNOME screen-reader command also named ``orca``.
+
+    Quantum Chemistry ORCA is commonly installed outside the system PATH.  On
+    Debian/Ubuntu, ``/usr/bin/orca`` can instead be GNOME Orca, which accepts
+    a very different command line and otherwise produces a confusing failure
+    only after a calculation has been started.
+    """
+    try:
+        header = executable.read_bytes()[:4096]
+    except OSError:
+        return False
+    return b"gi.require_version(\"Atspi\"" in header and b"from orca import" in header
 
 
 def find_orca() -> str:
@@ -16,12 +32,44 @@ def find_orca() -> str:
     if configured:
         executable = Path(configured).expanduser()
         if executable.is_file() and os.access(executable, os.X_OK):
+            if _is_gnome_orca(executable):
+                raise RuntimeError(
+                    f"STORCA_ORCA_BIN points to GNOME Orca, not the ORCA quantum-chemistry executable: {executable}"
+                )
             return str(executable.resolve())
         raise RuntimeError(f"STORCA_ORCA_BIN is not an executable file: {executable}")
     orca = shutil.which("orca")
     if orca is None:
         raise RuntimeError("ORCA executable not found in PATH")
+    if _is_gnome_orca(Path(orca)):
+        raise RuntimeError(
+            f"Found GNOME Orca at {orca}, not the ORCA quantum-chemistry executable. "
+            "Set STORCA_ORCA_BIN to the real ORCA binary."
+        )
     return orca
+
+
+def find_xtb() -> str:
+    """Return xTB from an override, the active Python environment, or PATH."""
+    configured = os.environ.get("STORCA_XTB_BIN")
+    if configured:
+        executable = Path(configured).expanduser()
+        if executable.is_file() and os.access(executable, os.X_OK):
+            return str(executable.resolve())
+        raise RuntimeError(f"STORCA_XTB_BIN is not an executable file: {executable}")
+    # Do not resolve the Python symlink first: virtual environments commonly
+    # link ``bin/python`` to the system interpreter while keeping tools such as
+    # xTB beside the symlink in the environment's own ``bin`` directory.
+    environment_executable = Path(sys.executable).parent / "xtb"
+    if environment_executable.is_file() and os.access(environment_executable, os.X_OK):
+        return str(environment_executable.resolve())
+    executable = shutil.which("xtb")
+    if executable:
+        return str(Path(executable).resolve())
+    raise RuntimeError(
+        "xTB executable not found beside the active Python interpreter or in PATH; "
+        "set STORCA_XTB_BIN if it is installed elsewhere"
+    )
 
 
 def validate_orca_output(out_file: Path) -> dict:

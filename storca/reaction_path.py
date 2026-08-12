@@ -117,6 +117,13 @@ _NEB_ANGLE_WARNING = re.compile(
     r"Warning:\s*maximum\s+angle\s+between\s+images\s*\(([^)]*)\)",
     re.IGNORECASE,
 )
+_NEB_MONOTONIC_WARNING = re.compile(
+    r"Warning:\s*path\s+is\s+strictly\s+increasing\s+in\s+energy\s+"
+    r"LBFGS\s+(\d+)\s+(\d+)",
+    re.IGNORECASE,
+)
+_NEB_LBFGS_ITERATION = re.compile(r"^\s*(?:Warning:.*?\s+)?LBFGS\s+\d+\s+\d+", re.IGNORECASE)
+_NEB_MONOTONIC_STOP_STREAK = 12
 
 
 def _neb_intermediate_image_indices(output: Path) -> list[int]:
@@ -152,6 +159,41 @@ def _neb_angle_warning_image_indices(output: Path) -> list[int]:
             if index > 0:
                 indices.add(index)
     return sorted(indices)
+
+
+def _neb_monotonic_endpoint_diagnostic(output: Path) -> dict:
+    """Recognize a persistent endpoint maximum, not a transient initial band."""
+    output = Path(output)
+    if not output.is_file():
+        return {"status": "not_detected", "valid": False, "trailing_iteration_count": 0}
+    streak = 0
+    maximum_streak = 0
+    highest_energy_image = None
+    last_iteration = None
+    for line in output.read_text(errors="replace").splitlines():
+        match = _NEB_MONOTONIC_WARNING.search(line)
+        if match:
+            streak += 1
+            maximum_streak = max(maximum_streak, streak)
+            last_iteration = int(match.group(1))
+            highest_energy_image = int(match.group(2))
+        elif _NEB_LBFGS_ITERATION.search(line):
+            streak = 0
+    valid = streak >= _NEB_MONOTONIC_STOP_STREAK
+    return {
+        "status": "persistent_monotonic_endpoint_maximum" if valid else "not_detected",
+        "valid": valid,
+        "trailing_iteration_count": streak,
+        "maximum_iteration_count": maximum_streak,
+        "last_iteration": last_iteration,
+        "highest_energy_image": highest_energy_image,
+        "required_consecutive_iterations": _NEB_MONOTONIC_STOP_STREAK,
+        "interpretation": (
+            "The highest-energy image remained an endpoint for the bounded warning streak; "
+            "no interior transition-state candidate was available."
+            if valid else None
+        ),
+    }
 
 
 def _validate_neb_intermediates(
@@ -220,9 +262,13 @@ def _validate_neb_intermediates(
         "segmented_verification": {
             "status": "prepared" if validated else "not_prepared",
             "segments": [
-                {"from": "declared_reactants", "to": item["optimized_xyz"]},
-                {"from": item["optimized_xyz"], "to": "declared_products"},
-            ] if validated else [],
+                segment
+                for intermediate in validated
+                for segment in (
+                    {"from": "declared_reactants", "to": intermediate["optimized_xyz"]},
+                    {"from": intermediate["optimized_xyz"], "to": "declared_products"},
+                )
+            ],
             "requirements": [
                 "optimize/validate each segment transition state",
                 "require one relevant imaginary frequency per transition state",
@@ -274,16 +320,55 @@ def _run_segmented_intermediate_nebs(
     for intermediate in candidates:
         intermediate_xyz = Path(intermediate["optimized_xyz"])
         endpoints = [
-            ("reactants-to-intermediate", Path(reactant_xyz), intermediate_xyz),
-            ("intermediate-to-products", intermediate_xyz, Path(product_xyz)),
+            (
+                "reactants-to-intermediate", Path(reactant_xyz), intermediate_xyz,
+                len(route.reactant_smiles), 1,
+                list(route.reactant_multiplicities), [route.multiplicity],
+            ),
+            (
+                "intermediate-to-products", intermediate_xyz, Path(product_xyz),
+                1, len(route.product_smiles),
+                [route.multiplicity], list(route.product_multiplicities),
+            ),
         ]
-        for label, source, target in endpoints:
+        for (label, source, target, source_fragment_count, target_fragment_count,
+             source_fragment_multiplicities, target_fragment_multiplicities) in endpoints:
             segment_dir = path_dir / "segments" / label
             segment_dir.mkdir(parents=True, exist_ok=True)
             segment_reactant = segment_dir / "reactant.xyz"
             segment_product = segment_dir / "product.xyz"
             shutil.copy2(source, segment_reactant)
             shutil.copy2(target, segment_product)
+            channel_kind = (
+                "association" if source_fragment_count > target_fragment_count else
+                "dissociation" if source_fragment_count < target_fragment_count else
+                "bound_rearrangement"
+            )
+            if source_fragment_count > 1 or target_fragment_count > 1:
+                segment_records.append({
+                    "label": label,
+                    "status": "channel_specific_solver_required",
+                    "channel_kind": channel_kind,
+                    "source_fragment_count": source_fragment_count,
+                    "target_fragment_count": target_fragment_count,
+                    "source_fragment_multiplicities": source_fragment_multiplicities,
+                    "target_fragment_multiplicities": target_fragment_multiplicities,
+                    "selected_total_multiplicity": route.multiplicity,
+                    "reactant_xyz": str(segment_reactant),
+                    "product_xyz": str(segment_product),
+                    "required_solver": (
+                        "fragment_spin_validated_capture_recrossing_model"
+                        if channel_kind == "association" else
+                        "fragment_spin_validated_constrained_dissociation_scan"
+                    ),
+                    "reason": (
+                        "A separated-channel endpoint preserves only the selected total multiplicity. "
+                        "An unconstrained endpoint optimization or fixed-end NEB cannot prove that "
+                        "the declared fragment-local spin states and connectivity were retained."
+                    ),
+                    "rate_claim_allowed": False,
+                })
+                continue
             neb_input = create_orca_neb_ts_input(
                 segment_reactant, segment_product,
                 charge=route.charge, multiplicity=route.multiplicity,
@@ -295,9 +380,15 @@ def _run_segmented_intermediate_nebs(
                 execution = _run_or_resume(neb_input, timeout_seconds=timeout_seconds)
                 trajectory = _locate_neb_trajectory(segment_dir, neb_input.stem)
                 ts = _locate_neb_ts(segment_dir, neb_input.stem)
+                execution_status = execution.get("status")
                 segment_records.append({
                     "label": label,
-                    "status": "computed",
+                    "status": (
+                        "computed" if execution_status in {"completed", "completed_no_interior_barrier"}
+                        else "path_quality_warning" if execution_status == "completed_path_quality_warning"
+                        else "incomplete"
+                    ),
+                    "channel_kind": channel_kind,
                     "input": str(neb_input),
                     "output": execution.get("output"),
                     "execution": execution,
@@ -314,10 +405,16 @@ def _run_segmented_intermediate_nebs(
                     "rate_claim_allowed": False,
                 })
     completed = sum(item.get("status") == "computed" for item in segment_records)
+    deferred = sum(item.get("status") == "channel_specific_solver_required" for item in segment_records)
     return {
-        "status": "computed" if completed == len(segment_records) else "incomplete",
+        "status": (
+            "computed" if completed == len(segment_records) else
+            "channel_specific_solver_required" if deferred else
+            "incomplete"
+        ),
         "segment_count": len(segment_records),
         "completed_segment_count": completed,
+        "channel_specific_segment_count": deferred,
         "image_count_per_segment": segment_image_count,
         "segments": segment_records,
         "rate_claim_allowed": False,
@@ -352,6 +449,7 @@ def _run_or_resume(input_path: Path, *, timeout_seconds: float | None) -> dict:
     no_barrier_outcome = _orca_neb_no_barrier_outcome(output)
     existing_intermediates = _neb_intermediate_image_indices(output)
     existing_angle_warning = _neb_angle_warning_image_indices(output)
+    existing_monotonic_warning = _neb_monotonic_endpoint_diagnostic(output)
     if contract.get("sha256") == digest.hexdigest():
         if _normal_orca_output(output):
             return {"status": "completed", "resumed": True, "input": str(input_path), "output": str(output)}
@@ -376,16 +474,32 @@ def _run_or_resume(input_path: Path, *, timeout_seconds: float | None) -> dict:
                     "image_indices": existing_angle_warning,
                 },
             }
+        if existing_monotonic_warning["valid"]:
+            return {
+                "status": "completed_path_quality_warning", "resumed": True,
+                "input": str(input_path), "output": str(output),
+                "path_quality_warning": existing_monotonic_warning,
+            }
 
     is_neb = "NEB-TS" in input_text.upper()
+    monotonic_streak = 0
+    stopped_for_monotonic = False
 
     def _stream(line: str) -> bool | None:
         # Preserve ORCA's native output verbatim while allowing a NEB warning
         # to interrupt the expensive single-band calculation immediately.
+        nonlocal monotonic_streak, stopped_for_monotonic
         print(line, end="", flush=True)
+        monotonic_match = _NEB_MONOTONIC_WARNING.search(line) if is_neb else None
+        if monotonic_match:
+            monotonic_streak += 1
+        elif is_neb and _NEB_LBFGS_ITERATION.search(line):
+            monotonic_streak = 0
+        stopped_for_monotonic = monotonic_streak >= _NEB_MONOTONIC_STOP_STREAK
         return bool(is_neb and (
             _NEB_INTERMEDIATE_WARNING.search(line)
             or _NEB_ANGLE_WARNING.search(line)
+            or stopped_for_monotonic
         ))
 
     try:
@@ -399,19 +513,26 @@ def _run_or_resume(input_path: Path, *, timeout_seconds: float | None) -> dict:
         no_barrier_outcome = _orca_neb_no_barrier_outcome(output)
         existing_intermediates = _neb_intermediate_image_indices(output)
         existing_angle_warning = _neb_angle_warning_image_indices(output)
-        if not no_barrier_outcome["valid"] and not existing_intermediates and not existing_angle_warning:
+        existing_monotonic_warning = _neb_monotonic_endpoint_diagnostic(output)
+        if (not no_barrier_outcome["valid"] and not existing_intermediates
+                and not existing_angle_warning and not existing_monotonic_warning["valid"]):
             raise
         artifacts = {
             "out": output,
-            "stopped_early": bool(existing_intermediates or existing_angle_warning),
+            "stopped_early": bool(
+                existing_intermediates or existing_angle_warning or existing_monotonic_warning["valid"]
+            ),
         }
     normal_termination = _normal_orca_output(Path(artifacts["out"]))
     no_barrier_outcome = _orca_neb_no_barrier_outcome(Path(artifacts["out"]))
     intermediate_indices = _neb_intermediate_image_indices(Path(artifacts["out"]))
     angle_warning_indices = _neb_angle_warning_image_indices(Path(artifacts["out"]))
+    monotonic_warning = _neb_monotonic_endpoint_diagnostic(Path(artifacts["out"]))
     interrupted_for_intermediate = bool(artifacts.get("stopped_early")) and bool(intermediate_indices)
     interrupted_for_angle = bool(artifacts.get("stopped_early")) and bool(angle_warning_indices)
-    if not normal_termination and not no_barrier_outcome["valid"] and not interrupted_for_intermediate and not interrupted_for_angle:
+    interrupted_for_monotonic = bool(artifacts.get("stopped_early")) and monotonic_warning["valid"]
+    if (not normal_termination and not no_barrier_outcome["valid"] and not interrupted_for_intermediate
+            and not interrupted_for_angle and not interrupted_for_monotonic):
         raise RuntimeError(f"ORCA returned without its normal-termination marker: {artifacts['out']}")
     _write_json(contract_path, {
         "schema_version": 1,
@@ -422,7 +543,7 @@ def _run_or_resume(input_path: Path, *, timeout_seconds: float | None) -> dict:
     })
     status = (
         "completed_intermediate_detected" if interrupted_for_intermediate else
-        "completed_path_quality_warning" if interrupted_for_angle else
+        "completed_path_quality_warning" if interrupted_for_angle or interrupted_for_monotonic else
         "completed" if normal_termination else "completed_no_interior_barrier"
     )
     result = {
@@ -438,6 +559,8 @@ def _run_or_resume(input_path: Path, *, timeout_seconds: float | None) -> dict:
             "kind": "maximum_angle_between_images",
             "image_indices": angle_warning_indices,
         }
+    elif monotonic_warning["valid"]:
+        result["path_quality_warning"] = monotonic_warning
     if interrupted_for_intermediate:
         result["early_stop"] = {
             "status": "stopped_after_orca_intermediate_warning",
@@ -449,6 +572,15 @@ def _run_or_resume(input_path: Path, *, timeout_seconds: float | None) -> dict:
             "status": "stopped_after_neb_path_quality_warning",
             "reason": "ORCA reported a maximum-angle path cusp during the live NEB stream",
             "image_indices": angle_warning_indices,
+        }
+    elif interrupted_for_monotonic:
+        result["early_stop"] = {
+            "status": "stopped_after_persistent_monotonic_endpoint_maximum",
+            "reason": (
+                "ORCA retained an endpoint as the highest-energy image for "
+                f"{_NEB_MONOTONIC_STOP_STREAK} consecutive NEB iterations"
+            ),
+            "highest_energy_image": monotonic_warning.get("highest_energy_image"),
         }
     return result
 
@@ -1512,6 +1644,10 @@ def run_generic_reaction_path(
         if reproducible_pair_found:
             break
     verified = [item for item in result["orientations"] if item.get("status") == "verified_transition_state_path"]
+    segmented = [
+        item for item in result["orientations"]
+        if item.get("status") == "intermediate_detected_requires_segmented_verification"
+    ]
     barrierless = [
         item for item in result["orientations"]
         if item.get("path_classification") in {
@@ -1569,11 +1705,23 @@ def run_generic_reaction_path(
         )
     canonical["stationary_points"] = stationary
     if chosen is None:
-        canonical.update(
-            status="surface_unresolved",
-            endpoint_validation={"status": "no_validated_orientation", "valid": False},
-            convergence={"status": "path_unresolved"},
-        )
+        if segmented:
+            selected = segmented[0]
+            canonical.update(
+                status="intermediate_detected_requires_segmented_verification",
+                path_classification="multistep_intermediate_detected",
+                endpoint_validation=selected.get("endpoint_validation", {"valid": False}),
+                path_evidence=selected.get("path_evidence"),
+                intermediate_evidence=selected.get("intermediate_evidence"),
+                selected_orientation=selected.get("orientation"),
+                convergence={"status": "segmented_path_verification_incomplete"},
+            )
+        else:
+            canonical.update(
+                status="surface_unresolved",
+                endpoint_validation={"status": "no_validated_orientation", "valid": False},
+                convergence={"status": "path_unresolved"},
+            )
     else:
         canonical.update(
             path_classification=chosen["path_classification"],

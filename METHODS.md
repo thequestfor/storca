@@ -59,10 +59,125 @@ substitute for an explicit environment calculation. It is a small, empirical
 calibration layer whose parameters must earn their place through held-out
 experimental benchmarks.
 
-The current ensemble covers isolated-molecule conformers. Hydrogen-bonded
-clusters and explicit-environment snapshots are the next validation-gated
-extension; they must be weighted by meaningful conditions rather than added
-equally to a monomer spectrum.
+Experimental runs serialize a versioned condition contract containing the
+resolved phase, temperature, pressure, composition, solvent, concentration,
+measurement geometry, resolution, apodization, and available optical geometry.
+Unknown fields remain null or absent and cause condition-matched evaluation to
+fail closed. The calculated absorption-strength array is retained as
+`spectrum_intrinsic.csv` before ATR or instrument transfer; `spectrum.csv` is
+the separately rendered measurement.
+
+The experimental FTIR model can additionally evaluate a bounded set of neutral
+dimer geometries and, for bounded small protic molecules, linear and cyclic
+trimer geometries for eligible neat condensed phases. Dimer and trimer
+intensities are divided by two and three respectively. A per-band
+environment-sufficiency gate requires at least three independent geometry
+clusters, positive frequency variance, effective sample size of at least 2.5,
+documented interaction-geometry diversity, and displacement overlap of at
+least 0.45 covering at least 80% of the band population. A failed distribution
+is retained diagnostically but collapsed to its weighted center before the
+small residual linewidth and instrument response are applied. Passing these
+minimum-evidence checks does not establish thermodynamic sampling or liquid
+convergence. Larger aggregates, trajectory occupancies, and representative DFT
+correction transfer remain validation-gated extensions.
+Statistics are clustered by independent environment before effective sample
+size and geometric diversity are calculated. Local oscillators are separated
+into hydrogen-bonded and non-donating spectral classes, with donor-only,
+acceptor-only, donor-acceptor, and free coordination retained diagnostically.
+
+The current restrained-xTB stage deterministically proposes 40 (`auto`) or 75
+(`balanced`) dimer/trimer poses from the retained monomer atom ordering. It spans
+the configured hydrogen-bond distance, angle, axial-rotation, and framework
+coordinates, then runs an isolated GFN2-xTB loose optimization with distance,
+angle, and, where well-defined, dihedral bias potentials. Each candidate is
+content-hashed and resumable. Post-optimization validation checks atom order,
+intramolecular connectivity, collisions, association distance, and departure
+from its requested sampling stratum. xTB electronic energies are retained only
+as sampling features: the stratified poses receive no population weights and
+are not labelled as a liquid ensemble. Near-duplicates are removed using fixed
+interaction-coordinate, local-frequency, and heavy-atom-RMSD thresholds. The
+representative acquisition controller identifies prevalent local
+bond/coordination classes and first seeks three independent environments for
+each class. Remaining jobs maximize local-frequency, interaction-geometry,
+topology, and association diversity. Transfer validation after each cumulative
+ORCA batch reprioritizes pending representatives that contain failed classes.
+The `auto` and `balanced` hard caps remain four and six environments. These representatives
+receive equal geometry-stratum weights rather than electronic-energy Boltzmann
+weights. The global ORCA cap reserves their jobs before allocating monomer
+jobs. ORCA evaluates a snapshot Hessian at the selected restrained-xTB geometry
+without an unconstrained DFT optimization; low-frequency nonstationarity is
+retained diagnostically and the result is not labelled an unconstrained DFT
+minimum. Representatives are submitted central-first and then by farthest-point
+diversity in cumulative batches (`2,3,4` for `auto`; `2,4,6` for `balanced`).
+Important band centers and raw distribution widths, integrated intensity, mode
+overlap, new significant bands, and a fixed-width whole-spectrum cosine overlap
+are compared after every batch. Two consecutive passing comparisons are
+required. A sufficient distribution that reaches the hard ORCA budget first is
+retained as provisional and explicitly labelled unconverged.
+Every retained xTB geometry also receives a resumable unrestrained GFN2-xTB
+numerical Hessian. Gaussian-style xTB normal coordinates are parsed and
+projected onto the same local X--H coordinates and internal-coordinate
+fingerprints as ORCA. At representative geometries, STORCA forms additive
+frequency corrections and validates them by leaving one independent
+representative out. A mode class fails closed unless it has at least three
+representatives, similarity at least 0.50, at least 20% improvement over raw
+xTB, high-frequency MAE at most 30 cm^-1, maximum error at most 75 cm^-1, and
+applicability coverage. Transfer uncertainty combines withheld error,
+correction spread, and environment distance. Cluster intensities are divided
+by cluster size, but xTB intensity transfer remains disabled pending its own
+validation. Stratified equal weights are explicitly not liquid populations.
+Transferred convergence treats one candidate as the independent statistical
+unit per mode class, even when a trimer contributes multiple local stretches.
+It must pass two consecutive batches under three deterministic stratified
+orders; candidate bootstrap intervals are reported for centers and equivalent
+FWHM values. A hybrid diagnostic combines corrected local frequencies with
+mean representative-ORCA intensity for the same class and retains
+representative ORCA nonlocal modes. It becomes the display basis only if
+validation, order-robust convergence, and local-intensity coverage all pass.
+For equal atom counts, normal modes are projected onto an inferred
+internal-coordinate basis containing bond stretches, angle bends, torsions,
+and chordless-ring deformations. Normalized coordinate-participation
+fingerprints provide the primary assignment, with frequency as a weak guard
+and geometry-aligned Cartesian overlap as a fallback. Chemical stretch labels
+include C=O, C-O, C-N, C-H, O-H, and N-H where the geometry supports them.
+Across differently sized dimer and trimer Hessians, X--H modes still use the
+validated target-local bond projection; generalized cross-size fingerprint
+matching remains incomplete. Multiple molecules in one cluster do not count
+as independent environment configurations.
+Snapshot Hessians with modes below -50 cm^-1 are labelled poor-stationarity and
+their full Hessian is diagnostic-only; this does not automatically discard a
+high-confidence target-local X--H projection. Retained legacy jobs without a
+gradient contract explicitly report that gradient reliability is unavailable.
+The environment-preserving refinement contract applies interaction restraints
+only during optimization. Its separate unrestrained gradient must pass RMS
+3e-4 and maximum-component 1e-3 hartree/bohr gates before full-Hessian use is
+permitted; otherwise local-mode finite differences are required.
+The finite-difference implementation displaces the heavy atom and hydrogen in
+opposite mass-weighted directions so their pair center of mass is unchanged.
+Analytic ORCA gradients and dipoles are evaluated at plus and minus 0.005 and
+0.010 Angstrom displacements. The projected curvature and dipole derivative
+are Richardson-extrapolated; the two raw frequencies must agree within 20
+cm^-1. Each physical ORCA process attempt is recorded against a stage-local
+hard invocation cap. Validated finite-difference frequencies and intensities
+override only the matching bond-local snapshot-Hessian pair; the retained
+Hessian continues to supply nonlocal modes. Stationary validation compares the
+center and summed intensity of the complete localized stretch set with the
+corresponding coupled normal-mode subspace, rather than comparing arbitrary
+individual symmetric or antisymmetric modes.
+The environment fallback planner selects at most one oscillator of a given
+mode class from each representative, preventing a cyclic trimer from inflating
+independent coverage. It allocates complete three-representative class blocks
+only; an allowance too small for a complete block is left unspent. Local jobs
+share a namespaced run-level ledger so equal bond indices in different
+representatives remain distinct process invocations.
+Static xTB ensembles can be extended in independently seeded 20-candidate
+acquisition rounds. Each round preserves dimer, linear/cyclic trimer, and
+strong/intermediate/weak association coverage. Convergence compares real
+cumulative rounds rather than arbitrary prefixes: two consecutive comparisons
+must pass the center, width, whole-spectrum-overlap, and new-class gates.
+Additionally, every final band must have center and FWHM bootstrap 95% interval
+half-widths no larger than 15 and 25 cm^-1 respectively. Ordering permutations
+remain sensitivity diagnostics rather than substitutes for new observations.
 
 ### Held-out harmonic scaling
 
@@ -72,6 +187,11 @@ named training molecules by prominent-band position error, and then reports a
 separate holdout score. It never invokes ORCA, edits an existing run, or
 automatically changes the default profile. This guards against improving a
 small, heterogeneous benchmark by overfitting its digitized references.
+Schema-v2 reference entries retain a content hash, provenance, condition
+contract, and fixed dataset partition. One canonical chemical identity cannot
+occur in more than one locked partition. Legacy schema-v1 references and v2
+`development_unassigned` entries remain usable for development diagnostics but
+do not constitute a held-out validation claim.
 
 ## Stability condition models
 

@@ -10,10 +10,13 @@ import numpy as np
 from storca.reaction_path import (
     _neb_angle_warning_image_indices,
     _neb_intermediate_image_indices,
+    _neb_monotonic_endpoint_diagnostic,
     _orca_neb_no_barrier_outcome,
     _run_generic_orientation,
     _run_or_resume,
+    _run_segmented_intermediate_nebs,
     _stationary_fragment_records,
+    _validate_neb_intermediates,
     classify_path_energy_profile,
     run_generic_reaction_path,
 )
@@ -28,6 +31,41 @@ from storca.route_verify import RouteSpec, route_spec_from_rmg_route
 
 
 class GenericReactionPathTests(unittest.TestCase):
+    @patch("storca.reaction_path._optimize_endpoint")
+    def test_validated_neb_intermediate_prepares_both_segments(self, optimize):
+        route = self._association_route()
+        with tempfile.TemporaryDirectory() as temp:
+            path_dir = Path(temp)
+            write_xyz(
+                path_dir / "reactant.xyz", ["H"], np.asarray([[0.0, 0.0, 0.0]]), "reactant",
+            )
+            write_xyz(
+                path_dir / "neb-ts_im3.xyz", ["H"], np.asarray([[0.0, 0.0, 0.5]]), "intermediate",
+            )
+            optimized = write_xyz(
+                path_dir / "intermediate.xyz", ["H"], np.asarray([[0.0, 0.0, 0.4]]), "optimized",
+            )
+            output = path_dir / "neb-ts.out"
+            output.write_text("Possible intermediate minimum found at image(s): 3\n")
+            optimize.return_value = {
+                "optimized_xyz": optimized,
+                "optimization": {"out": path_dir / "opt.out"},
+                "frequency": {"out": path_dir / "freq.out"},
+                "frequency_check": {"IsMinimum": True},
+            }
+
+            result = _validate_neb_intermediates(
+                route, neb_output=output, path_dir=path_dir, ncores=1,
+                method_keywords=None, timeout_seconds=1.0,
+            )
+
+        self.assertEqual(result["status"], "validated_intermediate_detected")
+        self.assertEqual(result["validated_candidate_count"], 1)
+        self.assertEqual(result["segmented_verification"]["segments"], [
+            {"from": "declared_reactants", "to": str(optimized)},
+            {"from": str(optimized), "to": "declared_products"},
+        ])
+
     def test_orca_intermediate_image_diagnostic_is_parsed(self):
         with tempfile.TemporaryDirectory() as temp:
             output = Path(temp) / "neb-ts.out"
@@ -72,6 +110,96 @@ class GenericReactionPathTests(unittest.TestCase):
             self.assertEqual(result["status"], "completed_intermediate_detected")
             self.assertEqual(result["intermediate_image_indices"], [2])
             self.assertEqual(result["early_stop"]["status"], "stopped_after_orca_intermediate_warning")
+
+    @patch("storca.reaction_path.run_orca")
+    def test_persistent_monotonic_endpoint_path_stops_early(self, run_orca):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            inp = folder / "neb-ts.inp"
+            inp.write_text(
+                "! B3LYP def2-SVP NEB-TS\n"
+                '%neb\n  Product "product.xyz"\nend\n'
+                "* xyzfile 0 1 reactant.xyz\n"
+            )
+            (folder / "reactant.xyz").write_text("1\nreactant\nH 0 0 0\n")
+            (folder / "product.xyz").write_text("1\nproduct\nH 0 0 1\n")
+            output = inp.with_suffix(".out")
+
+            def stopped(input_path, **kwargs):
+                lines = [
+                    f"Warning: path is strictly increasing in energy   LBFGS {index:5d}      7    0.08\n"
+                    for index in range(12)
+                ]
+                decisions = [kwargs["stream_output"](line) for line in lines]
+                output.write_text("".join(lines))
+                self.assertFalse(any(decisions[:-1]))
+                self.assertTrue(decisions[-1])
+                return {"out": output, "stopped_early": True}
+
+            run_orca.side_effect = stopped
+            result = _run_or_resume(inp, timeout_seconds=10.0)
+
+        self.assertEqual(result["status"], "completed_path_quality_warning")
+        self.assertEqual(
+            result["early_stop"]["status"],
+            "stopped_after_persistent_monotonic_endpoint_maximum",
+        )
+        self.assertEqual(result["path_quality_warning"]["highest_energy_image"], 7)
+
+    def test_monotonic_warning_parser_requires_a_trailing_streak(self):
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "neb-ts.out"
+            output.write_text("".join(
+                f"Warning: path is strictly increasing in energy LBFGS {index} 7 0.08\n"
+                for index in range(12)
+            ) + "   LBFGS    12      4    0.06\n")
+            result = _neb_monotonic_endpoint_diagnostic(output)
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["maximum_iteration_count"], 12)
+
+    @patch("storca.reaction_path._run_or_resume")
+    def test_separated_intermediate_segments_require_channel_specific_solvers(self, run_or_resume):
+        route = RouteSpec(
+            route_id="two-to-two",
+            source="test",
+            parent_smiles="N=O",
+            reactant_smiles=("N=O", "N=O"),
+            product_smiles=("[N]=O", "N[O]"),
+            multiplicity=1,
+            reactant_multiplicities=(1, 1),
+            product_multiplicities=(2, 2),
+            protocol="generic_endpoint_path",
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            reactant = folder / "reactant.xyz"
+            product = folder / "product.xyz"
+            intermediate = folder / "intermediate.xyz"
+            geometry = "6\ntest\nN 0 0 0\nO 0 0 1\nH 0 1 0\nN 3 0 0\nO 3 0 1\nH 3 1 0\n"
+            for path in (reactant, product, intermediate):
+                path.write_text(geometry)
+            result = _run_segmented_intermediate_nebs(
+                route,
+                reactant_xyz=reactant,
+                product_xyz=product,
+                intermediate_evidence={"candidates": [{
+                    "status": "validated_intermediate_minimum",
+                    "optimized_xyz": str(intermediate),
+                }]},
+                path_dir=folder / "path",
+                separated_fragments=True,
+                ncores=1,
+                method_keywords=None,
+                timeout_seconds=1.0,
+                neb_images=8,
+            )
+        run_or_resume.assert_not_called()
+        self.assertEqual(result["status"], "channel_specific_solver_required")
+        self.assertEqual(result["channel_specific_segment_count"], 2)
+        self.assertEqual(
+            [item["channel_kind"] for item in result["segments"]],
+            ["association", "dissociation"],
+        )
 
     @staticmethod
     def _association_route() -> RouteSpec:
@@ -151,6 +279,43 @@ class GenericReactionPathTests(unittest.TestCase):
         self.assertTrue(result["valid"], result)
         self.assertEqual(result["source"], "automatic_minimum_graph_edit_symmetry_canonicalized")
         self.assertEqual(result["symmetry_resolution"]["equivalent_mapping_count"], 2)
+
+    def test_hno_water_route_canonicalizes_equivalent_hydrogen_transfers(self):
+        route = RouteSpec(
+            route_id="hno-water-disproportionation",
+            source="test",
+            parent_smiles="N=O",
+            reactant_smiles=("N=O", "N=O"),
+            product_smiles=("[N-]=[N+]=O", "O"),
+            multiplicity=1,
+            reactant_multiplicities=(1, 1),
+            product_multiplicities=(1, 1),
+            protocol="generic_endpoint_path",
+        )
+        result = resolve_route_atom_mapping(route)
+        self.assertTrue(result["valid"], result)
+        self.assertEqual(len(result["hydrogen_transfers"]), 2)
+        self.assertEqual(
+            result["hydrogen_symmetry_resolution"]["status"],
+            "equivalent_hydrogen_permutations_canonicalized",
+        )
+        self.assertEqual(len({item["product_acceptor_index"] for item in result["hydrogen_transfers"]}), 1)
+
+    def test_multiple_distinct_hydrogen_donors_and_acceptors_remain_ambiguous(self):
+        route = RouteSpec(
+            route_id="distinct-two-centre-transfer",
+            source="test",
+            parent_smiles="CO",
+            reactant_smiles=("CO", "CO", "[NH2]", "[NH2]"),
+            product_smiles=("C[O]", "C[O]", "N", "N"),
+            multiplicity=1,
+            reactant_multiplicities=(1, 1, 2, 2),
+            product_multiplicities=(2, 2, 1, 1),
+            protocol="generic_endpoint_path",
+        )
+        result = resolve_route_atom_mapping(route)
+        self.assertFalse(result["valid"], result)
+        self.assertEqual(result["status"], "ambiguous_hydrogen_transfer_mapping")
 
     def test_automatic_mapping_keeps_distinct_isomerization_maps_ambiguous(self):
         route = RouteSpec(
@@ -560,6 +725,35 @@ class GenericReactionPathTests(unittest.TestCase):
         self.assertEqual(run_orientation.call_count, 2)
         self.assertEqual(verification["status"], "barrierless_rate_model_required")
         self.assertEqual(verification["barrierless_reproducibility"]["status"], "reproducible")
+
+    @patch("storca.reaction_path._stationary_fragment_xyz", return_value=None)
+    @patch("storca.reaction_path._stationary_fragment_records")
+    @patch("storca.reaction_path._run_generic_orientation")
+    def test_validated_intermediate_status_is_preserved_at_route_level(
+        self, run_orientation, stationary, stationary_xyz,
+    ):
+        run_orientation.return_value = {
+            "orientation": 1,
+            "status": "intermediate_detected_requires_segmented_verification",
+            "path_classification": "multistep_intermediate_detected",
+            "endpoint_validation": {"valid": True},
+            "path_evidence": {"kind": "orca_neb_intermediate_path", "rate_claim_allowed": False},
+            "intermediate_evidence": {
+                "status": "validated_intermediate_detected",
+                "segmented_verification": {"status": "computed"},
+            },
+        }
+        stationary.return_value = {"status": "validated", "valid": True, "reactants": [], "products": []}
+
+        with tempfile.TemporaryDirectory() as temp:
+            verification = run_generic_reaction_path(self._association_route(), Path(temp))["route_verification"]
+
+        self.assertEqual(run_orientation.call_count, 3)
+        self.assertEqual(verification["status"], "intermediate_detected_requires_segmented_verification")
+        self.assertEqual(verification["path_classification"], "multistep_intermediate_detected")
+        self.assertEqual(verification["selected_orientation"], 1)
+        self.assertEqual(verification["intermediate_evidence"]["segmented_verification"]["status"], "computed")
+        self.assertEqual(verification["convergence"]["status"], "segmented_path_verification_incomplete")
 
     @patch("storca.reaction_path._stationary_fragment_xyz", return_value=None)
     @patch("storca.reaction_path._stationary_fragment_records")

@@ -11,6 +11,7 @@ import numpy as np
 
 from .analysis import analyze_ir_spectra
 from .benchmark import compare_spectra
+from .ir_benchmark import load_ir_manifest
 from .spectrum import build_ir_spectrum, format_spectrum, load_completed_ir_records, write_spectrum_csv
 
 
@@ -32,12 +33,10 @@ def scale_grid(start: float, stop: float, step: float) -> list[float]:
 
 def _manifest_entries(manifest_path: Path, profile: str) -> list[dict]:
     manifest_path = Path(manifest_path)
-    manifest = json.loads(manifest_path.read_text())
-    if manifest.get("schema_version") != 1:
-        raise ValueError("Unsupported IR benchmark manifest schema")
+    manifest, manifest_entries = load_ir_manifest(manifest_path)
     entries = []
     seen_ids: set[str] = set()
-    for entry in manifest.get("entries", []):
+    for entry in manifest_entries:
         entry_id = entry.get("id")
         if not entry_id or entry_id in seen_ids:
             raise ValueError("IR benchmark manifest IDs must be present and unique")
@@ -49,7 +48,10 @@ def _manifest_entries(manifest_path: Path, profile: str) -> list[dict]:
         reference = (manifest_path.parent / entry["reference_spectrum"]).resolve()
         if not prediction.is_file() or not reference.is_file():
             continue
-        entries.append({"id": entry["id"], "run_dir": prediction.parent, "reference": reference})
+        entries.append({
+            "id": entry["id"], "run_dir": prediction.parent, "reference": reference,
+            "partition": entry.get("partition", "development_unassigned"),
+        })
     return entries
 
 
@@ -133,6 +135,12 @@ def calibrate_harmonic_scale(
     if unknown:
         raise ValueError(f"No usable '{profile}' spectrum is registered for: {', '.join(unknown)}")
     requested_ids = set(training_ids) | set(holdout_ids)
+    if any(by_id[item].get("partition") not in {"training", "development_unassigned"}
+           for item in training_ids if item in by_id):
+        raise ValueError("Validation or holdout benchmark entries cannot be used for training")
+    if any(by_id[item].get("partition") not in {"holdout", "development_unassigned"}
+           for item in holdout_ids if item in by_id):
+        raise ValueError("Training or validation benchmark entries cannot be used as holdouts")
     for entry_id in requested_ids:
         entry = by_id[entry_id]
         entry["records"] = load_completed_ir_records(entry["run_dir"], temperature=temperature)
