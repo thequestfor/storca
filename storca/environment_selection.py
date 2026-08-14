@@ -10,7 +10,7 @@ import shutil
 import numpy as np
 
 
-SELECTION_SCHEMA_VERSION = 1
+SELECTION_SCHEMA_VERSION = 2
 FIDELITY_ENVIRONMENT_TARGETS = {"fast": 0, "auto": 4, "balanced": 6, "accurate": 10}
 
 
@@ -360,6 +360,20 @@ def select_xtb_environment_representatives(
         eligible, full_matrix, full_components,
     )
     unique = [eligible[index] for index in retained_indices]
+    eligible_by_id = {record["candidate_id"]: record for record in eligible}
+    support_weights: dict[str, float] = {}
+    explicit_occupancies = all(
+        isinstance(record.get("population_weight"), (int, float))
+        and math.isfinite(float(record["population_weight"]))
+        and float(record["population_weight"]) > 0
+        for record in eligible
+    )
+    if explicit_occupancies:
+        for group in deduplication:
+            support_weights[group["retained_candidate_id"]] = sum(
+                float(eligible_by_id[candidate_id]["population_weight"])
+                for candidate_id in group["member_candidate_ids"]
+            )
     unique_matrix = full_matrix[np.ix_(retained_indices, retained_indices)]
     selected_count = min(int(representative_count), len(unique))
     if selected_count < 1:
@@ -393,6 +407,26 @@ def select_xtb_environment_representatives(
     manifest_entries = []
     cluster_reports = []
     equal_weight = 1.0 / selected_count
+    cluster_weights = []
+    for cluster_index in range(selected_count):
+        members = [index for index, assignment in enumerate(assignments) if assignment == cluster_index]
+        cluster_weights.append(
+            sum(support_weights.get(unique[index]["candidate_id"], 0.0) for index in members)
+            if explicit_occupancies else equal_weight
+        )
+    total_cluster_weight = sum(cluster_weights)
+    if explicit_occupancies and total_cluster_weight <= 0:
+        raise RuntimeError("Trajectory occupancy weights did not reach any selected cluster")
+    if explicit_occupancies:
+        cluster_weights = [weight / total_cluster_weight for weight in cluster_weights]
+    population_model = (
+        str(unique[0].get("population_model") or "explicit_sample_occupancy")
+        if explicit_occupancies else "stratified_equal_representative_weights"
+    )
+    population_warning = (
+        str(unique[0].get("population_warning") or "Weights are sample occupancies.")
+        if explicit_occupancies else "Weights represent geometry strata, not liquid occupancies."
+    )
     for cluster_index, medoid in enumerate(medoids, start=1):
         members = [index for index, assignment in enumerate(assignments) if assignment == cluster_index - 1]
         representative = unique[medoid]
@@ -412,9 +446,9 @@ def select_xtb_environment_representatives(
             "association_class": association_class(representative),
             "sampling_support_count": len(members),
             "sampling_support_candidate_ids": sorted(unique[index]["candidate_id"] for index in members),
-            "population_weight": equal_weight,
-            "population_model": "stratified_equal_representative_weights",
-            "population_warning": "Weights represent geometry strata, not liquid occupancies.",
+            "population_weight": cluster_weights[cluster_index - 1],
+            "population_model": population_model,
+            "population_warning": population_warning,
             "geometry_role": "environment_snapshot",
             "cluster_size": int(representative.get("cluster_size", 2)),
             "topology": representative.get("topology", "dimer"),
@@ -454,8 +488,8 @@ def select_xtb_environment_representatives(
     manifest.write_text(json.dumps({
         "schema_version": SELECTION_SCHEMA_VERSION,
         "kind": "xtb_diversity_selected_environment_representatives",
-        "population_model": "stratified_equal_representative_weights",
-        "population_warning": "Weights represent geometry strata, not liquid occupancies.",
+        "population_model": population_model,
+        "population_warning": population_warning,
         "execution_order_model": (
             "mode_class_deficits_then_frequency_geometry_diversity"
             if acquisition_report is not None else "central_then_farthest_point_diversity"
@@ -497,8 +531,12 @@ def select_xtb_environment_representatives(
             "representatives": manifest_entries,
         },
         "population_model": {
-            "kind": "stratified_equal_representative_weights",
-            "warning": "Weights represent geometry strata, not liquid occupancies.",
+            "kind": population_model,
+            "warning": population_warning,
+            "weight_basis": (
+                "summed_decorrelated_snapshot_occupancy_by_representative_cluster"
+                if explicit_occupancies else "equal_geometry_strata"
+            ),
             "vacuum_energies_used_as_liquid_populations": False,
         },
     })

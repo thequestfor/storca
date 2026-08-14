@@ -252,6 +252,10 @@ def run_xtb_snapshot_frequency(
                 "topology": sampling_record.get("topology"),
                 "environment_features": sampling_record.get("environment_features"),
                 "acquisition_round": int(sampling_record.get("acquisition_round", 0)),
+                "population_weight": sampling_record.get("population_weight"),
+                "population_model": sampling_record.get("population_model"),
+                "population_warning": sampling_record.get("population_warning"),
+                "population_weight_basis": sampling_record.get("population_weight_basis"),
             }
             for key, value in additions.items():
                 if retained_record.get(key) != value:
@@ -281,6 +285,9 @@ def run_xtb_snapshot_frequency(
         "calculation": "unrestrained_snapshot_hessian",
         "restraints_in_hessian": False,
         "population_weight": sampling_record.get("population_weight"),
+        "population_model": sampling_record.get("population_model"),
+        "population_warning": sampling_record.get("population_warning"),
+        "population_weight_basis": sampling_record.get("population_weight_basis"),
         "cluster_size": int(sampling_record.get("cluster_size") or 1),
         "topology": sampling_record.get("topology"),
         "environment_features": sampling_record.get("environment_features"),

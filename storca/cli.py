@@ -19,6 +19,70 @@ from src.orca_runner import _is_gnome_orca, find_xtb
 app = typer.Typer(help="Reproducible ORCA calculation workflows.", no_args_is_help=True)
 
 
+@app.command(name="direct-local-dft")
+def direct_local_dft(
+    run_dir: Annotated[Path, typer.Option(help="Existing six-representative spectrum run.")],
+    nist_reference: Annotated[Optional[Path], typer.Option(help="Condition-compatible NIST/reference spectrum CSV.")] = None,
+    baseline_spectrum: Annotated[Optional[Path], typer.Option(help="Existing isolated-cluster baseline CSV.")] = None,
+    maximum_invocations: Annotated[int, typer.Option(min=1, help="Hard cap for additional ORCA gradient processes.")] = 24,
+    cores: Annotated[int, typer.Option(min=1, help="Cores per ORCA gradient invocation.")] = 8,
+    execute: Annotated[bool, typer.Option(help="Execute approved ORCA jobs; otherwise write only the fail-closed plan.")] = False,
+) -> None:
+    """Plan or execute the six-representative direct local-DFT gate."""
+    from .direct_local_dft import (
+        plan_six_representative_direct_local_dft,
+        run_six_representative_direct_local_dft,
+    )
+    conformers_path = run_dir / "clusters" / "conformers.json"
+    if not conformers_path.is_file():
+        raise typer.BadParameter(f"Environment conformers not found: {conformers_path}")
+    if execute:
+        result = run_six_representative_direct_local_dft(
+            run_dir, maximum_additional_orca_invocations=maximum_invocations,
+            ncores=cores, nist_reference_csv=nist_reference,
+            baseline_spectrum_csv=baseline_spectrum,
+        )
+    else:
+        result = plan_six_representative_direct_local_dft(
+            json.loads(conformers_path.read_text()),
+            maximum_additional_orca_invocations=maximum_invocations,
+        )
+        path = run_dir / "direct-local-dft-plan.json"
+        path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+        result["artifact"] = str(path)
+    typer.echo(f"Direct local-DFT status: {result['status']}")
+    typer.echo(f"Artifact: {result.get('artifact', '')}")
+
+
+@app.command(name="spectroscopy-gate-status")
+def spectroscopy_gate_status(
+    run_dir: Annotated[Path, typer.Option(help="Spectrum run containing retained gate artifacts.")],
+) -> None:
+    """Report which, if any, expensive spectroscopy stage is authorized next."""
+    from .spectroscopy_gates import evaluate_spectroscopy_gate_sequence
+    result = evaluate_spectroscopy_gate_sequence(run_dir)
+    typer.echo(f"Gate state: {result['state']}")
+    typer.echo(f"Authorized next stage: {result['authorized_next_expensive_stage'] or 'none'}")
+    typer.echo(f"Artifact: {result['artifact']}")
+
+
+@app.command(name="bulk-methanol-box")
+def bulk_methanol_box(
+    output_dir: Annotated[Path, typer.Option(help="Directory for the periodic-box artifacts.")],
+    molecules: Annotated[int, typer.Option(min=1)] = 216,
+    density: Annotated[float, typer.Option(min=0.001)] = 0.7866,
+    seed: Annotated[int, typer.Option()] = 1,
+) -> None:
+    """Build a seeded periodic methanol starting box at the declared density."""
+    from .bulk_embedding import BulkEmbeddingConfig, build_periodic_methanol_box
+    result = build_periodic_methanol_box(
+        output_dir,
+        config=BulkEmbeddingConfig(molecule_count=molecules, density_g_cm3=density),
+        seed=seed,
+    )
+    typer.echo(f"Periodic box: {result['artifact']}")
+
+
 @app.command(name="sunlight-spectrum-fetch")
 def sunlight_spectrum_fetch(
     output: Annotated[Path, typer.Option(help="Destination for normalized ASTM G173 AM1.5 global-tilt CSV.")] = Path("references/astm-g173-am15g.csv"),
@@ -351,6 +415,7 @@ def spectrum(
         from .environment_selection import allocate_orca_budget, select_xtb_environment_representatives
         from .environment_convergence import EnvironmentConvergenceConfig, convergence_schedule
         from .xtb_sampling import sample_xtb_dimer_environments, xtb_sampling_defaults
+        from .xtb_trajectory import xtb_trajectory_defaults
         cluster_plan = dimer_sampling_plan(
             canonical_smiles, phase=phase.lower(), charge=charge, multiplicity=multiplicity,
         )
@@ -386,6 +451,13 @@ def spectrum(
                 "representative_selection": "mode_class_coverage_then_frequency_geometry_diversity",
                 "include_trimers": bool(cluster_plan.get("trimer_eligible")),
             },
+            "xtb_trajectory_sampling": {
+                **xtb_trajectory_defaults(fidelity),
+                "temperature_K": temperature,
+                "requested": requested_clusters,
+                "seed_source": "diverse_restrained_xtb_optimized_strata",
+                "snapshot_use": "decorrelated_occupancy_weighted_environment_ensemble",
+            },
             "adaptive_environment_convergence": {
                 "requested": requested_clusters,
                 "configuration": asdict(EnvironmentConvergenceConfig()),
@@ -393,7 +465,7 @@ def spectrum(
                     fidelity, orca_allocation["reserved_environment_jobs"],
                 ),
             },
-            "unimplemented_tiers": ["microsolvation", "VPT2", "snapshot_dynamics", "AIMD"],
+            "unimplemented_tiers": ["microsolvation", "VPT2", "unrestrained_bulk_dynamics", "AIMD"],
         }
         plan_path = run_dir / "spectrum-plan.json"
         plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n")
@@ -436,6 +508,27 @@ def spectrum(
                     f"Retained {retained_xtb}/{len(xtb_sampling_records)} restrained xTB environments: "
                     f"{xtb_sampling_manifest}"
                 )
+                try:
+                    from .xtb_trajectory import sample_restrained_xtb_trajectories
+                    trajectory_records, trajectory_manifest = sample_restrained_xtb_trajectories(
+                        xtb_sampling_records, run_dir, fidelity=fidelity, charge=charge,
+                        multiplicity=multiplicity, ncores=cores, temperature_K=temperature,
+                        progress=typer.echo,
+                    )
+                    xtb_sampling_records = trajectory_records
+                    typer.echo(
+                        f"Retained {len(trajectory_records)} decorrelated restrained-xTB "
+                        f"trajectory snapshots: {trajectory_manifest}"
+                    )
+                except Exception as trajectory_error:
+                    write_metadata(
+                        run_dir, xtb_trajectory_sampling_status="failed_static_fallback",
+                        xtb_trajectory_sampling_error=str(trajectory_error),
+                    )
+                    typer.echo(
+                        "Restrained xTB trajectory sampling failed; using the retained static "
+                        f"coverage ensemble ({trajectory_error})", err=True,
+                    )
                 from .xtb_frequencies import sample_xtb_snapshot_frequencies
                 xtb_frequency_records, frequency_manifest = sample_xtb_snapshot_frequencies(
                     xtb_sampling_records, run_dir, charge=charge,
@@ -465,6 +558,15 @@ def spectrum(
                     typer.echo(
                         f"Selected {len(cluster_paths)} diverse xTB environment representatives: "
                         f"{cluster_manifest}"
+                    )
+                    from .environment_refinement import refine_selected_orca_environments
+                    cluster_paths, refinement_manifest = refine_selected_orca_environments(
+                        run_dir, charge=0, multiplicity=1, ncores=cores,
+                        method_keywords=profile["orca_keywords"], progress=typer.echo,
+                    )
+                    typer.echo(
+                        f"Completed environment-preserving DFT refinement and gradient gates: "
+                        f"{refinement_manifest}"
                     )
                 except Exception as error:
                     environment_selection_error = str(error)

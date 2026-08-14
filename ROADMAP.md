@@ -63,8 +63,8 @@ The repository already contains important pieces of this architecture:
 
 Important limitations remain:
 
-- environment populations are generally static strata, not trajectory
-  occupancies or liquid free-energy populations;
+- environment populations are conditional restrained-trajectory occupancies,
+  not unbiased liquid free-energy populations;
 - the sampled clusters do not yet constitute a finite-temperature bulk liquid,
   solution, or crystal ensemble;
 - equal-size mode identity now uses a general internal-coordinate description,
@@ -145,8 +145,8 @@ or is explicitly excluded from quantitative scoring.
 
 ## Milestone 2: Build large, finite-temperature environment ensembles
 
-**Status: Partial for restrained dimer and trimer pose sampling; planned for
-trajectory populations.**
+**Status: Partial: restrained dimer/trimer trajectories, decorrelated extraction,
+and conditional trajectory occupancies are implemented.**
 
 Purpose: use many inexpensive configurations to represent the environment
 distribution while keeping quantum-chemistry cost bounded.
@@ -225,8 +225,8 @@ jobs are assigned by diversity, and failed transfer classes reprioritize the
 pending ORCA queue after each batch. Remaining: generalized mixed-size non-X--H
 transfer, automatic budget-aware execution of the implemented local-mode
 finite differences for structures that fail the gradient gate,
-snapshot-specific validated intensity transfer, and trajectory
-occupancy weights.
+snapshot-specific validated intensity transfer, and unbiased/reweighted bulk
+trajectory populations beyond the current restrained finite-cluster protocol.
 
 Static ensemble extension is now available as a resumable command. It preserves
 the initial ensemble, adds independently seeded balanced 20-candidate rounds,

@@ -16,7 +16,7 @@ from src.inputgen import (create_orca_environment_refinement_input,
 from src.orca_runner import find_orca, run_orca
 
 
-REFINEMENT_SCHEMA_VERSION = 1
+REFINEMENT_SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -194,3 +194,83 @@ def representative_vibrational_route(refinement_record: dict) -> dict:
         "full_hessian_use": "not_permitted",
         "reason": "unrestrained_gradient_gate_not_passed",
     }
+
+
+def refine_selected_orca_environments(
+    run_dir: Path, *, charge: int = 0, multiplicity: int = 1, ncores: int = 1,
+    method_keywords: list[str] | None = None, progress=None,
+) -> tuple[list[Path], Path]:
+    """Refine selected environments and update their execution manifest in place."""
+    run_dir = Path(run_dir)
+    manifest_path = run_dir / "clusters" / "selected-conformers.json"
+    if not manifest_path.is_file():
+        raise RuntimeError("Environment refinement requires selected representatives")
+    manifest = json.loads(manifest_path.read_text())
+    entries = sorted(
+        manifest.get("conformers") or [], key=lambda item: int(item["selected_position"]),
+    )
+    if not entries:
+        raise RuntimeError("Environment refinement manifest has no representatives")
+    records = []
+    refined_paths = []
+    refinement_root = run_dir / "clusters" / "environment-refinements"
+    for position, entry in enumerate(entries, start=1):
+        candidate_id = str(entry["source_xtb_candidate_id"])
+        if progress:
+            progress(
+                f"Environment DFT refinement {position}/{len(entries)}: {candidate_id}"
+            )
+        source_path = Path(entry.get("source_xtb_xyz") or entry["xyz"])
+        record = refine_orca_environment(
+            source_path, entry.get("hydrogen_bond_interactions") or [],
+            refinement_root / candidate_id, charge=charge,
+            multiplicity=multiplicity, ncores=ncores,
+            method_keywords=method_keywords,
+        )
+        route = representative_vibrational_route(record)
+        refined_path = Path(record["refined_xyz"]) if record.get("refined_xyz") else source_path
+        entry.update({
+            "xyz": str(refined_path),
+            "pre_refinement_xyz": str(source_path),
+            "environment_refinement": record,
+            "environment_refinement_artifact": str(
+                refinement_root / candidate_id / "refinement-record.json"
+            ),
+            "vibrational_route": route,
+            "gradient_rms_hartree_per_bohr": (
+                (record.get("gradient") or {}).get("gradient_rms_hartree_per_bohr")
+            ),
+            "gradient_maximum_component_hartree_per_bohr": (
+                (record.get("gradient") or {}).get(
+                    "gradient_maximum_component_hartree_per_bohr"
+                )
+            ),
+        })
+        records.append({
+            "source_xtb_candidate_id": candidate_id,
+            "input_xyz": str(source_path),
+            "execution_xyz": str(refined_path),
+            "refinement": record,
+            "vibrational_route": route,
+        })
+        refined_paths.append(refined_path)
+    manifest["schema_version"] = max(3, int(manifest.get("schema_version", 0)))
+    manifest["environment_refinement"] = {
+        "kind": "constrained_dft_refinement_then_unrestrained_gradient_gate",
+        "requested": len(entries),
+        "completed": sum(item["refinement"].get("status") == "completed" for item in records),
+        "full_hessian_permitted": sum(
+            item["vibrational_route"].get("full_hessian_use") == "permitted"
+            for item in records
+        ),
+        "records": records,
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    report_path = run_dir / "environment-refinement.json"
+    report_path.write_text(json.dumps({
+        "schema_version": REFINEMENT_SCHEMA_VERSION,
+        "kind": "selected_environment_dft_refinement",
+        "manifest": str(manifest_path),
+        "records": records,
+    }, indent=2, sort_keys=True) + "\n")
+    return refined_paths, report_path

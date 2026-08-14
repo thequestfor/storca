@@ -176,6 +176,23 @@ def apply_finite_difference_pair_overrides(
     return output
 
 
+def gate_representative_pairs_by_stationarity(
+    pairs: Iterable[dict], conformer: dict, local_mode_payload: dict | None = None,
+) -> list[dict]:
+    """Exclude poor snapshot-Hessian pairs unless validated bond-local data replace them."""
+    poor = (
+        (conformer.get("snapshot_hessian_reliability") or {}).get(
+            "stationarity_status"
+        ) == "poor"
+    )
+    if local_mode_payload is not None:
+        return apply_finite_difference_pair_overrides(
+            pairs, local_mode_payload,
+            exclude_unvalidated_snapshot_pairs=poor,
+        )
+    return [] if poor else [dict(pair) for pair in pairs]
+
+
 def validate_frequency_transfer(
     pairs: Iterable[dict], *, config: TransferValidationConfig | None = None,
 ) -> dict:
@@ -761,15 +778,13 @@ def build_frequency_transfer_artifacts(run_dir: Path) -> dict:
                     / "local-mode-finite-differences" / "local-modes.json"
                 )
             local_mode_path = Path(local_mode_path)
-            if local_mode_path.is_file():
-                representative_pairs = apply_finite_difference_pair_overrides(
-                    representative_pairs, json.loads(local_mode_path.read_text()),
-                    exclude_unvalidated_snapshot_pairs=(
-                        (conformer.get("snapshot_hessian_reliability") or {}).get(
-                            "stationarity_status"
-                        ) == "poor"
-                    ),
-                )
+            local_mode_payload = (
+                json.loads(local_mode_path.read_text())
+                if local_mode_path.is_file() else None
+            )
+            representative_pairs = gate_representative_pairs_by_stationarity(
+                representative_pairs, conformer, local_mode_payload,
+            )
             pairs.extend(representative_pairs)
     validation = apply_ensemble_transfer_coverage(
         validate_frequency_transfer(pairs), xtb_records, pairs,

@@ -7,6 +7,7 @@ import numpy as np
 
 from storca.frequency_transfer import (apply_finite_difference_pair_overrides,
                                        evaluate_transferred_ensemble_convergence,
+                                       gate_representative_pairs_by_stationarity,
                                        transfer_snapshot_modes, validate_frequency_transfer,
                                        _write_or_activate_hybrid_spectrum)
 from storca.xtb_frequencies import parse_xtb_g98, run_xtb_snapshot_frequency
@@ -156,6 +157,12 @@ class FrequencyTransferTests(unittest.TestCase):
         )
         self.assertEqual(len(updated), 1)
         self.assertEqual(updated[0]["bond"]["molecule_index"], 0)
+
+    def test_poor_snapshot_without_local_modes_contributes_no_transfer_pairs(self):
+        conformer = {"snapshot_hessian_reliability": {"stationarity_status": "poor"}}
+        self.assertEqual(
+            gate_representative_pairs_by_stationarity(self.pairs(), conformer), []
+        )
 
     def test_transferred_ensemble_requires_two_stable_batch_comparisons(self):
         records = [{

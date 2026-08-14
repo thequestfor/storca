@@ -388,6 +388,9 @@ def load_completed_ir_records(run_dir: Path, *, temperature: float = 298.15) -> 
             "sampling_support_count", "source_xtb_candidate_id",
             "cluster_size", "topology", "molecule_atom_ranges", "local_stretch_bonds",
             "hydrogen_bond_interactions",
+            "environment_refinement", "environment_refinement_artifact",
+            "vibrational_route", "gradient_rms_hartree_per_bohr",
+            "gradient_maximum_component_hartree_per_bohr",
         ):
             if key in source:
                 record[key] = source[key]
@@ -810,6 +813,14 @@ def assemble_self_dimer_environment(
     convergence_path = run_dir / "environment-convergence.json"
     convergence_summary = (environment_convergence or {}).get("summary") or {}
     artifacts["environment_convergence"] = convergence_path if convergence_path.is_file() else None
+    cluster_population_models = sorted({
+        str(record["population_model"]) for record in normalized
+        if record.get("population_model")
+    })
+    cluster_population_warnings = sorted({
+        str(record["population_warning"]) for record in normalized
+        if record.get("population_warning")
+    })
     profile.update({
         "environment_source": (
             "sampled_neutral_dimer_trimer_network_configurations"
@@ -821,15 +832,21 @@ def assemble_self_dimer_environment(
         "environment_convergence_status": convergence_summary.get("status"),
         "environment_convergence_artifact": str(artifacts.get("environment_convergence") or ""),
         "intensity_normalization": "cluster_intensity_divided_by_target_molecule_count",
-        "cluster_population_model": "stratified_equal_representative_weights",
-        "population_warning": "Weights represent geometry strata, not liquid occupancies.",
+        "cluster_population_model": (
+            cluster_population_models[0]
+            if len(cluster_population_models) == 1 else cluster_population_models
+        ),
+        "population_warning": (
+            cluster_population_warnings[0]
+            if len(cluster_population_warnings) == 1 else cluster_population_warnings
+        ),
         "network_composition": (
             "dimers_plus_trimers" if any(int(record.get("cluster_size") or 2) == 3 for record in normalized)
             else "dimer_only"
         ),
         "snapshot_hessian_reliability": reliability_summary,
         "limitations": (
-            "Static neutral dimer/trimer snapshot Hessians are calculated with equal stratum weights, not exact "
+            "Neutral dimer/trimer snapshot Hessians use the recorded conditional sampling weights, not exact "
             "bulk populations. Explicit solvent, larger aggregates, anharmonic lifetimes, crystal packing, "
             "and vendor-specific instrument response are not represented."
         ),
@@ -1094,6 +1111,9 @@ def run_ir_spectrum(
             "sampling_support_count", "source_xtb_candidate_id",
             "cluster_size", "topology", "molecule_atom_ranges", "local_stretch_bonds",
             "hydrogen_bond_interactions",
+            "environment_refinement", "environment_refinement_artifact",
+            "vibrational_route", "gradient_rms_hartree_per_bohr",
+            "gradient_maximum_component_hartree_per_bohr",
         ):
             if key in source:
                 record[key] = source[key]
@@ -1146,6 +1166,29 @@ def run_ir_spectrum(
             record["frequency_check"] = frequency_stability_check(freq_out)
             if geometry_role == "environment_snapshot":
                 record["snapshot_hessian_reliability"] = _snapshot_hessian_reliability(record["frequency_check"])
+                refinement = record.get("environment_refinement") or {}
+                gradient = refinement.get("gradient") or {}
+                if refinement:
+                    frequency_reliability = record["snapshot_hessian_reliability"]
+                    gradient_permitted = refinement.get("full_hessian_use") == "permitted"
+                    frequency_permitted = frequency_reliability.get("stationarity_status") != "poor"
+                    record["snapshot_hessian_reliability"] = {
+                        **frequency_reliability,
+                        "gradient_rms_hartree_per_bohr": gradient.get(
+                            "gradient_rms_hartree_per_bohr"
+                        ),
+                        "gradient_maximum_component_hartree_per_bohr": gradient.get(
+                            "gradient_maximum_component_hartree_per_bohr"
+                        ),
+                        "gradient_status": refinement.get("stationarity_status"),
+                        "full_hessian_use": (
+                            "permitted" if gradient_permitted and frequency_permitted
+                            else "diagnostic_only"
+                        ),
+                        "stationarity_status": (
+                            "usable" if gradient_permitted and frequency_permitted else "poor"
+                        ),
+                    }
             record["ir_modes"] = parse_orca_ir(freq_out)
             if (not record["frequency_check"].get("IsMinimum")
                     and geometry_role != "environment_snapshot"):

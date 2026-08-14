@@ -79,6 +79,29 @@ class EnvironmentAcquisitionTests(unittest.TestCase):
         self.assertGreater(report["remaining_class_deficits"][key], 0)
         self.assertEqual(report["status"], "orca_budget_insufficient_for_mode_class_coverage")
 
+    def test_selector_prefers_usable_snapshot_when_coverage_is_equal(self):
+        records = self.records[:2]
+        frequencies = [
+            frequency_record(record["candidate_id"], [
+                ("non_donating_oh", "acceptor_only", 3550.0),
+            ])
+            for record in records
+        ]
+        frequencies[0]["snapshot_reliability"] = {"status": "usable_snapshot"}
+        frequencies[1]["snapshot_reliability"] = {"status": "large_imaginary_curvature"}
+        selected, report = select_mode_coverage_representatives(
+            records, frequencies, np.zeros((2, 2)), 1,
+            config=EnvironmentAcquisitionConfig(
+                minimum_sampled_environments=1, minimum_sampled_fraction=0.0,
+                target_dft_environments_per_class=1,
+            ),
+        )
+        self.assertEqual(selected, [0])
+        self.assertEqual(
+            report["decisions"][0]["snapshot_reliability"]["status"],
+            "usable_snapshot",
+        )
+
     def test_report_records_each_orca_feedback_batch_resumably(self):
         with tempfile.TemporaryDirectory() as temp:
             folder = Path(temp)

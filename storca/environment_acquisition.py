@@ -23,6 +23,7 @@ class EnvironmentAcquisitionConfig:
     geometry_diversity_weight: float = 0.15
     frequency_diversity_weight: float = 0.35
     topology_diversity_bonus: float = 3.00
+    usable_snapshot_bonus: float = 2.00
 
 
 def local_mode_class(mode: dict) -> str | None:
@@ -163,11 +164,16 @@ def select_mode_coverage_representatives(
                 resolved.topology_diversity_bonus
                 if records[index].get("topology", "dimer") not in selected_topologies else 0.0
             )
+            reliability = (profile.get("snapshot_reliability") or {}).get("status")
+            reliability_bonus = (
+                resolved.usable_snapshot_bonus if reliability == "usable_snapshot" else 0.0
+            )
             total = (
                 deficit_score
                 + resolved.frequency_diversity_weight * frequency_score
                 + resolved.geometry_diversity_weight * geometry_score
                 + topology_bonus
+                + reliability_bonus
             )
             return total, geometry_score, candidate_id
 
@@ -184,6 +190,9 @@ def select_mode_coverage_representatives(
             "coverage_before": before,
             "coverage_after": after,
             "selection_score": score(chosen)[0],
+            "snapshot_reliability": profiles.get(
+                str(records[chosen]["candidate_id"]), {}
+            ).get("snapshot_reliability"),
             "reason": (
                 "closes_significant_mode_class_deficit"
                 if any(after.get(key, 0) > before.get(key, 0) and before.get(key, 0) < resolved.target_dft_environments_per_class for key in significant)

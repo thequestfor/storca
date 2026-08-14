@@ -318,7 +318,13 @@ def create_orca_environment_refinement_input(
             raise ValueError("Invalid environment-refinement interaction geometry")
         constraints.append(f"    {{ B {hydrogen} {acceptor} {distance:.8f} C }}")
         if constrain_angles:
-            constraints.append(f"    {{ A {donor} {hydrogen} {acceptor} {angle:.8f} C }}")
+            # ORCA's redundant-coordinate optimizer treats near-linear bends
+            # specially and only permits freezing their current value.
+            constraints.append(
+                f"    {{ A {donor} {hydrogen} {acceptor} C }}"
+                if angle >= 170.0 else
+                f"    {{ A {donor} {hydrogen} {acceptor} {angle:.8f} C }}"
+            )
     geom = "\n".join([
         "%geom", f"  MaxIter {max_iterations}", "  Constraints",
         *constraints, "  end", "end",
@@ -332,11 +338,21 @@ def create_orca_environment_refinement_input(
 def create_orca_gradient_input(
     xyz_file: Path, *, charge: int, multiplicity: int, label: str = "gradient",
     ncores: int = 1, method_keywords: list[str] | None = None,
+    point_charge_file: Path | None = None,
 ) -> Path:
     """Create an unrestrained analytic-gradient job for a retained geometry."""
+    blocks = None
+    if point_charge_file is not None:
+        point_charge_file = Path(point_charge_file)
+        if not point_charge_file.is_file():
+            raise FileNotFoundError(f"Point-charge file not found: {point_charge_file}")
+        if point_charge_file.parent.resolve() != Path(xyz_file).parent.resolve():
+            raise ValueError("Gradient geometry and point-charge file must share one directory")
+        blocks = [f'%pointcharges "{point_charge_file.name}"']
     return _write_orca_xyzfile_job(
         xyz_file, label=label, charge=charge, multiplicity=multiplicity, ncores=ncores,
         keyword_line=_orca_method_line(method_keywords, "TightSCF", "EnGrad"),
+        blocks=blocks,
     )
 
 

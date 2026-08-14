@@ -9,6 +9,7 @@ import json
 import math
 from pathlib import Path
 import re
+import shutil
 from typing import Iterable
 
 import numpy as np
@@ -354,15 +355,22 @@ def calculate_orca_local_modes(
     config: LocalModeFiniteDifferenceConfig | None = None,
     orca_ledger_path: Path | None = None,
     ledger_namespace: str = "",
+    point_charge_file: Path | None = None,
 ) -> dict:
     """Run cached ±gradient calculations and return validated local modes."""
     resolved = config or LocalModeFiniteDifferenceConfig()
+    if ncores > 1 and shutil.which("mpirun") is None:
+        raise RuntimeError(
+            "Parallel ORCA local modes require mpirun on PATH; refusing to consume "
+            "an ORCA invocation before the MPI runtime is configured"
+        )
     steps = tuple(sorted({float(value) for value in resolved.displacement_steps_angstrom}))
     if len(steps) != 2 or steps[0] <= 0:
         raise ValueError("Local-mode validation requires two positive displacement sizes")
     xyz_path, job_dir = Path(xyz_path), Path(job_dir)
     job_dir.mkdir(parents=True, exist_ok=True)
     source = xyz_path.read_bytes()
+    point_charge_source = Path(point_charge_file).read_bytes() if point_charge_file is not None else None
     input_xyz = job_dir / "input.xyz"
     if input_xyz.is_file() and input_xyz.read_bytes() != source:
         raise RuntimeError("Refusing to replace a different retained local-mode input")
@@ -382,6 +390,12 @@ def calculate_orca_local_modes(
             "displacement_steps_angstrom": list(resolved.displacement_steps_angstrom),
         },
         "orca_invocations_required": 4 * len(bonds),
+        "electrostatic_embedding": (
+            {
+                "point_charge_sha256": hashlib.sha256(point_charge_source).hexdigest(),
+                "point_charge_count": int(point_charge_source.splitlines()[0]),
+            } if point_charge_source is not None else None
+        ),
     }
     contract_path, result_path = job_dir / "calculation-contract.json", job_dir / "local-modes.json"
     if contract_path.is_file() and json.loads(contract_path.read_text()) != contract:
@@ -419,9 +433,16 @@ def calculate_orca_local_modes(
         calculation_dir.mkdir(parents=True, exist_ok=True)
         geometry = calculation_dir / "geometry.xyz"
         _write_xyz(geometry, symbols, displaced, f"local mode bond {heavy}-{hydrogen} {sign * step:+.6f} A")
+        calculation_point_charges = None
+        if point_charge_source is not None:
+            calculation_point_charges = calculation_dir / "embedding.pc"
+            if calculation_point_charges.is_file() and calculation_point_charges.read_bytes() != point_charge_source:
+                raise RuntimeError("Refusing to replace different retained embedding point charges")
+            calculation_point_charges.write_bytes(point_charge_source)
         gradient_input = create_orca_gradient_input(
             geometry, charge=charge, multiplicity=multiplicity, label="gradient",
             ncores=ncores, method_keywords=method_keywords,
+            point_charge_file=calculation_point_charges,
         )
         input_hash = hashlib.sha256(gradient_input.read_bytes()).hexdigest()
         prefix = f"{ledger_namespace}:" if ledger_namespace else ""

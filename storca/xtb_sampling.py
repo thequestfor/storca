@@ -376,12 +376,19 @@ def run_xtb_candidate(
         "cluster_size": int(pose.get("cluster_size", 2)),
         "topology": pose.get("topology", "dimer"),
         "molecule_atom_ranges": pose.get("molecule_atom_ranges"),
+        "symbols": list(pose["symbols"]),
+        "bonds": [list(pair) for pair in pose.get("bonds", [])],
+        "monomer_atom_count": int(pose["monomer_atom_count"]),
         "local_stretch_bonds": classify_local_stretch_bonds(
             pose.get("local_stretch_bonds", []), pose.get("interactions") or [pose],
             int(pose["monomer_atom_count"]),
         ),
         "hydrogen_bond_interactions": [
-            {key: item[key] for key in ("donor_atom", "donor_hydrogen", "acceptor_atom")}
+            {
+                **{key: item[key] for key in ("donor_atom", "donor_hydrogen", "acceptor_atom")},
+                "target_geometry": item.get("target_geometry"),
+                "orientation_atoms": item.get("orientation_atoms"),
+            }
             for item in (pose.get("interactions") or [pose])
         ],
         "target_geometry": pose["target_geometry"],

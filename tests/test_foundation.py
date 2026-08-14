@@ -1106,6 +1106,15 @@ print('normal termination of xtb')
                     "geometry_cluster_id": "environment-cluster-001",
                     "independent_environment_id": "environment-cluster-001",
                     "environment_features": {"geometry_cluster_id": "environment-cluster-001"},
+                    "environment_refinement": {
+                        "status": "completed",
+                        "stationarity_status": "poor",
+                        "full_hessian_use": "diagnostic_only",
+                        "gradient": {
+                            "gradient_rms_hartree_per_bohr": 8.0e-4,
+                            "gradient_maximum_component_hartree_per_bohr": 2.0e-3,
+                        },
+                    },
                 }],
             }))
             result = run_ir_spectrum(
@@ -1117,6 +1126,10 @@ print('normal termination of xtb')
         self.assertEqual(result["conformers"][0]["geometry_role"], "environment_snapshot")
         self.assertEqual(result["conformers"][0]["geometry_cluster_id"], "environment-cluster-001")
         self.assertEqual(result["conformers"][0]["population_weight"], 1.0)
+        reliability = result["conformers"][0]["snapshot_hessian_reliability"]
+        self.assertEqual(reliability["stationarity_status"], "poor")
+        self.assertEqual(reliability["full_hessian_use"], "diagnostic_only")
+        self.assertEqual(reliability["gradient_rms_hartree_per_bohr"], 8.0e-4)
 
     def test_self_dimer_intensities_are_normalized_per_molecule(self):
         records = [{"ir_modes": [{"mode": 1, "freq": 1000.0, "intensity": 20.0}]}]

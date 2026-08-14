@@ -1,5 +1,39 @@
 # STORCA
 
+### Gated direct-local-DFT and bulk-liquid development
+
+The O--H environment workflow now has three fail-closed implementation levels:
+
+- `storca.direct_local_dft` acquires representatives 4--6 with a persistent
+  process ledger and assembles `direct-local-dft-ensemble.json`, separate
+  intrinsic/transmission/comparison CSV files, and NIST regional metrics.  It
+  excludes every harmonic mode in the configured O--H window and replaces that
+  window only with validated ORCA projected finite-difference modes; it never
+  imports or applies the xTB frequency-transfer model.
+- `storca.adaptive_local_modes` selects later representatives from trajectory
+  occupancy, coordination, H-bond geometry, topology, geometric diversity, and
+  distance from calculated environments.  Batches contain three representatives,
+  and uncertainty resamples whole trajectory clusters.  Two consecutive batches
+  must pass center, FWHM, envelope-overlap, CI, effective-sample-size, and class
+  coverage gates.
+- `storca.bulk_embedding` builds a seeded periodic methanol box at 298.15 K
+  density, validates NVT observables and autocorrelation, extracts the central
+  methanol plus its geometric first H-bond shell, and writes reproducible ORCA
+  external-point-charge inputs.  Embedded local modes use four gradients on
+  eight cores per central O--H bond.  Promotion requires two independent seeds
+  and improvement on held-out trajectory blocks.
+
+`evaluate_spectroscopy_gate_sequence(run_dir)` in
+`storca.spectroscopy_gates` reads the retained artifacts and authorizes only the
+next justified expensive stage.  Missing references, fewer than three valid
+environments in a coordination class, or incomplete finite-difference evidence
+block promotion.
+
+The six-representative planner also checks the arithmetic of the calculation
+request before launching ORCA.  At four gradients per bond, nine new bonds cost
+36 invocations, not 24; a 24-invocation hard cap therefore fails closed unless
+the retained representative manifest contains at most six uncached bonds.
+
 STORCA is a small, reproducible workflow for ORCA geometry optimizations and
 vibrational frequency calculations. Each calculation writes to its own run
 directory rather than cluttering the repository root.
@@ -291,19 +325,32 @@ chains and cyclic trimers where geometrically plausible. The `auto` and
 `balanced` tiers propose 40 and 75 total poses respectively across 1.6--2.5 Angstrom H--acceptor distances,
 120--180 degree donor--H--acceptor angles, hydrogen-bond-axis rotations, and
 alternative framework orientations. Each pose receives an isolated, weakly
-restrained GFN2-xTB optimization with a content-hashed resume contract. This
-is followed by a separately cached, unrestrained GFN2-xTB numerical Hessian at
-the retained snapshot; the sampling restraints are never included in the force
-constants. The resulting local X--H frequencies are included in the diversity
-feature space. This inexpensive ensemble consumes no ORCA budget and is not assigned liquid
-population weights. Near-duplicates are removed using interaction geometry and
-aligned heavy-atom RMSD. A coverage-constrained acquisition controller then
+restrained GFN2-xTB optimization with a content-hashed resume contract. Four
+(`auto`) or six (`balanced`) diverse poses then seed restrained NVT GFN2-xTB
+trajectories at the requested spectrum temperature (298.15 K by default). The
+bounded defaults are 2 ps (`auto`) and 4 ps (`balanced`), with coordinates
+propagated at a conservative 0.5 fs step with hydrogen mass 4 and written every
+10 fs. STORCA rejects xTB's nominal-success emergency exits and truncated
+trajectories, discards the first 25%, estimates statistical
+inefficiency from the restrained-contact time series, and extracts frames at
+no less than that autocorrelation stride. The 40/75-frame target ensemble
+receives equal-time snapshot occupancies. These are conditional occupancies
+within the finite restrained multi-seed protocol, not unbiased bulk-liquid
+equilibrium populations. If trajectory sampling fails, the workflow records
+the downgrade and falls back to the static coverage ensemble.
+
+Each retained trajectory snapshot receives a separately cached, unrestrained
+GFN2-xTB numerical Hessian; the sampling restraints are never included in the
+force constants. The resulting local X--H frequencies are included in the
+diversity feature space. This inexpensive ensemble consumes no ORCA budget.
+Near-duplicates are removed using interaction geometry and aligned heavy-atom
+RMSD while preserving their occupancy mass. A coverage-constrained acquisition controller then
 selects four (`auto`) or six (`balanced`) representatives. It first targets
 three independent representatives for every prevalent local mode/coordination
 class, then spends remaining jobs on frequency, geometry, topology, and
 association diversity. After each ORCA batch, failed transfer classes are
-moved ahead of redundant pending representatives. Representatives receive equal stratum
-weights with an explicit warning that these are not liquid occupancies.
+moved ahead of redundant pending representatives. Representatives receive the
+summed occupancy of the decorrelated snapshots assigned to their clusters.
 
 Environment jobs are reserved before GOAT monomer jobs: the default 12-job cap
 allocates 8 monomers plus 4 environments for `auto`, or 6 plus 6 for
@@ -385,6 +432,9 @@ The run keeps the layers separate:
 - `environment-sampling.json`: restrained-xTB sampling configuration,
   candidate records, the explicit no-population warning, versioned sufficiency
   thresholds, per-band decisions, failure reasons, and display-width policy.
+- `xtb-trajectories.json` and `environment-trajectories/`: restrained NVT
+  contracts, raw trajectories, decorrelation diagnostics, extracted snapshots,
+  and conditional occupancy weights.
 - `environment-convergence.json`: cumulative batch metrics, threshold results,
   consecutive-pass count, manifest hash, budget state, and stop reason.
 - `environment-acquisition.json`: sampled mode-class prevalence, required and
@@ -419,7 +469,7 @@ The run keeps the layers separate:
 - `spectrum_environment_sampled.csv/png`: the uncollapsed sampled environment
   distribution retained for diagnosis even when it fails the display gate.
 - `clusters.json` and `clusters/`: selected xTB medoids, geometry-cluster and
-  equal-weight contracts, and their independent resumable ORCA snapshot
+  trajectory-occupancy contracts, and their independent resumable ORCA snapshot
   artifacts.
 - `spectrum_monomer*.csv/png`: the monomer-only result retained before a
   successful network environment replaces the displayed spectrum.
@@ -441,11 +491,11 @@ spin coupling and counterion environment are underspecified.
 Phase defaults for the residual linewidth are deliberately small: 1, 4, 6,
 and 8 cm^-1 for gas, solution, liquid, and solid respectively. Override them
 with `--residual-fwhm` when a condition-matched calibration supports doing so.
-The model does not add decorative noise or baselines. Restrained static neutral
-dimers/trimers and equal stratum weights are a geometry-coverage model, not exact bulk
-populations. Larger aggregation, explicit solvent configurations, anharmonic
-lifetimes, crystal packing, VPT2, larger-cluster convergence, and molecular dynamics
-remain unimplemented. Their absence is recorded rather than hidden by a large
+The model does not add decorative noise or baselines. Restrained finite-time
+neutral dimer/trimer trajectories supply conditional snapshot occupancies, not
+exact bulk populations. Larger aggregation, explicit solvent configurations, anharmonic
+lifetimes, crystal packing, VPT2, and larger-cluster convergence remain
+unimplemented. Their absence is recorded rather than hidden by a large
 empirical FWHM.
 
 ## RMG stability screen

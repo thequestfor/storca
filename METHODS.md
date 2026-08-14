@@ -78,8 +78,8 @@ least 0.45 covering at least 80% of the band population. A failed distribution
 is retained diagnostically but collapsed to its weighted center before the
 small residual linewidth and instrument response are applied. Passing these
 minimum-evidence checks does not establish thermodynamic sampling or liquid
-convergence. Larger aggregates, trajectory occupancies, and representative DFT
-correction transfer remain validation-gated extensions.
+convergence. Larger aggregates, unbiased bulk occupancies, and representative
+DFT correction transfer remain validation-gated extensions.
 Statistics are clustered by independent environment before effective sample
 size and geometric diversity are calculated. Local oscillators are separated
 into hydrogen-bonded and non-donating spectral classes, with donor-only,
@@ -93,17 +93,29 @@ angle, and, where well-defined, dihedral bias potentials. Each candidate is
 content-hashed and resumable. Post-optimization validation checks atom order,
 intramolecular connectivity, collisions, association distance, and departure
 from its requested sampling stratum. xTB electronic energies are retained only
-as sampling features: the stratified poses receive no population weights and
-are not labelled as a liquid ensemble. Near-duplicates are removed using fixed
+as sampling features: the stratified seed poses receive no population weights.
+Four (`auto`) or six (`balanced`) diverse poses seed restrained NVT GFN2-xTB
+trajectories at the spectrum temperature (298.15 K by default), for 2 or 4 ps
+respectively. A 0.5 fs step and hydrogen mass 4 are used without SHAKE;
+coordinates are dumped every 10 fs. Emergency-exit text or fewer than 95% of
+the expected frames fails the trajectory even if xTB returns success. Partial
+seed completion is rejected rather than renormalized. The first 25% is discarded,
+and an initial-positive-sequence statistical-inefficiency estimate sets the
+minimum extraction stride. At most 40/75 decorrelated frames are retained and
+assigned equal-time occupancy. These occupancies are conditional on the finite
+restrained multi-seed protocol and are not labelled as unbiased bulk-liquid
+populations. A failed trajectory stage records the downgrade and falls back to
+the static coverage ensemble. Near-duplicates are removed using fixed
 interaction-coordinate, local-frequency, and heavy-atom-RMSD thresholds. The
 representative acquisition controller identifies prevalent local
 bond/coordination classes and first seeks three independent environments for
 each class. Remaining jobs maximize local-frequency, interaction-geometry,
 topology, and association diversity. Transfer validation after each cumulative
 ORCA batch reprioritizes pending representatives that contain failed classes.
-The `auto` and `balanced` hard caps remain four and six environments. These representatives
-receive equal geometry-stratum weights rather than electronic-energy Boltzmann
-weights. The global ORCA cap reserves their jobs before allocating monomer
+The `auto` and `balanced` hard caps remain four and six environments. Each
+representative receives the summed occupancy of the decorrelated frames mapped
+to its cluster; duplicate removal preserves the removed frames' occupancy
+mass. The global ORCA cap reserves their jobs before allocating monomer
 jobs. ORCA evaluates a snapshot Hessian at the selected restrained-xTB geometry
 without an unconstrained DFT optimization; low-frequency nonstationarity is
 retained diagnostically and the result is not labelled an unconstrained DFT
@@ -125,7 +137,8 @@ xTB, high-frequency MAE at most 30 cm^-1, maximum error at most 75 cm^-1, and
 applicability coverage. Transfer uncertainty combines withheld error,
 correction spread, and environment distance. Cluster intensities are divided
 by cluster size, but xTB intensity transfer remains disabled pending its own
-validation. Stratified equal weights are explicitly not liquid populations.
+validation. Restrained-trajectory occupancies are explicitly not asserted to
+be unbiased liquid populations.
 Transferred convergence treats one candidate as the independent statistical
 unit per mode class, even when a trimer contributes multiple local stretches.
 It must pass two consecutive batches under three deterministic stratified
