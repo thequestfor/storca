@@ -1,0 +1,341 @@
+{
+  "schema_version": 1,
+  "kind": "storca_stability_roadmap_manifest",
+  "scope": "Traceability and validation profiles for stability development. This manifest records support contracts; it is not itself evidence of experimental accuracy.",
+  "documents": {
+    "roadmap": "STABILITY_ROADMAP.md",
+    "requirements": "docs/stability/REQUIREMENTS.md",
+    "traceability": "docs/stability/TRACEABILITY.md",
+    "definition_of_supported": "docs/stability/DEFINITION_OF_SUPPORTED.md",
+    "methods": "METHODS.md",
+    "limitations": "LIMITATIONS.md"
+  },
+  "allowed_roadmap_statuses": [
+    "planned",
+    "in_progress",
+    "implemented_unvalidated",
+    "scientifically_validated",
+    "observable_supported",
+    "blocked",
+    "deferred"
+  ],
+  "milestones": [
+    {
+      "milestone_id": "M0",
+      "title": "Roadmap governance and traceability",
+      "status": "implemented_unvalidated",
+      "dependencies": [],
+      "requirement_ids": ["STAB-GOV-001", "STAB-GOV-002"],
+      "next_issue": null,
+      "acceptance_evidence": ["tests/test_stability_roadmap_traceability.py"]
+    },
+    {
+      "milestone_id": "M1",
+      "title": "Unified stability campaign",
+      "status": "implemented_unvalidated",
+      "dependencies": ["M0"],
+      "requirement_ids": [
+        "STAB-CAM-001", "STAB-CAM-002", "STAB-CAM-003", "STAB-CAM-004",
+        "STAB-CAM-005", "STAB-CAM-006", "STAB-ENV-001", "STAB-ENV-002",
+        "STAB-ENV-003", "STAB-PROP-001", "STAB-PROP-002", "STAB-PROV-001",
+        "STAB-PROV-002", "STAB-PROV-003", "STAB-PROV-004", "STAB-PROV-005"
+      ],
+      "next_issue": null,
+      "acceptance_evidence": [
+        "tests/test_stability_lanes.py",
+        "tests/test_stability_campaign_contract.py",
+        "tests/test_stability_campaign_planning.py",
+        "tests/test_gas_campaign_adapter.py",
+        "tests/test_solution_campaign_adapter.py",
+        "tests/test_stability_campaign_execution.py",
+        "examples/stability-campaign/gas-only.json",
+        "examples/stability-campaign/gas-executable.json",
+        "examples/stability-campaign/solution-verified-executable.json",
+        "examples/stability-campaign/solution-mass-action-executable.json",
+        "examples/stability-campaign/gas-and-solution-executable.json",
+        "examples/stability-campaign/evidence/water-smd-298K-environment.json",
+        "examples/stability-campaign/evidence/water-smd-298K-mass-action-environment.json",
+        "examples/stability-campaign/evidence/cyclopropane-propene-verified-mass-action-network.json",
+        "examples/stability-campaign/evidence/cyclobutane-verified-solution-network.json",
+        "examples/stability-campaign/solution-only.json",
+        "examples/stability-campaign/gas-and-solution.json",
+        "examples/stability-campaign/unsupported-lanes.json"
+      ]
+    },
+    {
+      "milestone_id": "M2",
+      "title": "Autonomous multi-source candidate assembly",
+      "status": "in_progress",
+      "dependencies": ["M1"],
+      "requirement_ids": [
+        "STAB-DISC-001", "STAB-DISC-002", "STAB-DISC-003", "STAB-DISC-004",
+        "STAB-DISC-005", "STAB-DISC-006", "STAB-DISC-007", "STAB-DISC-008",
+        "STAB-PATH-007", "STAB-PATH-008", "STAB-PATH-009",
+        "STAB-UNC-001", "STAB-UNC-002", "STAB-ALLOC-001", "STAB-ALLOC-002",
+        "STAB-CONV-001", "STAB-CONV-002", "STAB-OBS-002"
+      ],
+      "next_issue": "STAB-009",
+      "acceptance_evidence": [
+        "tests/test_reaction_discovery.py",
+        "tests/test_discovery_assembly.py",
+        "tests/test_discovery_coverage.py",
+        "tests/test_stability_verification_wiring.py",
+        "tests/test_kinetic_uncertainty.py",
+        "tests/test_surface_resolution.py",
+        "tests/test_intermediate_identity.py",
+        "tests/test_generic_reaction_path.py",
+        "tests/test_verification_adapters.py",
+        "tests/test_verification_engine.py",
+        "benchmarks/stability/surface_resolution_profiles.json",
+        "benchmarks/kinetics/reaction_discovery_manifest.json",
+        "benchmarks/kinetics/coverage_risk_manifest.json"
+      ]
+    },
+    {
+      "milestone_id": "M3",
+      "title": "Conformer- and temperature-aware rate evidence",
+      "status": "planned",
+      "dependencies": ["M2"],
+      "requirement_ids": [
+        "STAB-PATH-001", "STAB-PATH-002", "STAB-PATH-003", "STAB-PATH-004",
+        "STAB-PATH-005", "STAB-PATH-006", "STAB-RATE-001", "STAB-RATE-002",
+        "STAB-RATE-003", "STAB-RATE-004", "STAB-UNC-003"
+      ],
+      "next_issue": "STAB-009",
+      "acceptance_evidence": []
+    },
+    {
+      "milestone_id": "M4",
+      "title": "Bimolecular homogeneous-solution kinetics",
+      "status": "in_progress",
+      "dependencies": ["M3"],
+      "requirement_ids": [
+        "STAB-RATE-008", "STAB-PROP-003", "STAB-PROP-004", "STAB-OBS-001",
+        "STAB-ENV-004"
+      ],
+      "next_issue": null,
+      "acceptance_evidence": [
+        "tests/test_solution_mass_action.py",
+        "tests/test_stability_lanes.py"
+      ]
+    },
+    {
+      "milestone_id": "M5",
+      "title": "Auditable method selection and escalation",
+      "status": "planned",
+      "dependencies": ["M3"],
+      "requirement_ids": ["STAB-METHOD-001", "STAB-METHOD-002"],
+      "next_issue": null,
+      "acceptance_evidence": []
+    },
+    {
+      "milestone_id": "M6",
+      "title": "Pressure-dependent, barrierless, and tunneling kinetics",
+      "status": "in_progress",
+      "dependencies": ["M5"],
+      "requirement_ids": ["STAB-RATE-005", "STAB-RATE-006", "STAB-RATE-007"],
+      "next_issue": "M6-BENCH-002",
+      "acceptance_evidence": [
+        "tests/test_specialist_rates.py",
+        "tests/test_specialist_rate_benchmark.py",
+        "tests/test_mess_adapter.py",
+        "docs/stability/MESS_RATE_ADMISSION.md",
+        "tests/test_flux_verification.py",
+        "tests/test_verification_engine.py",
+        "tests/test_verification_resume.py",
+        "benchmarks/kinetics/specialist_rate_manifest.json",
+        "docs/stability/SPECIALIST_RATE_BACKENDS.md"
+      ]
+    },
+    {
+      "milestone_id": "M7",
+      "title": "Microsolvation and solvent-assisted escalation",
+      "status": "planned",
+      "dependencies": ["M4", "M5"],
+      "requirement_ids": ["STAB-ENV-005"],
+      "next_issue": null,
+      "acceptance_evidence": []
+    },
+    {
+      "milestone_id": "M8",
+      "title": "Photochemical stability",
+      "status": "in_progress",
+      "dependencies": ["M1", "M5"],
+      "requirement_ids": ["STAB-ENV-006"],
+      "next_issue": null,
+      "acceptance_evidence": []
+    },
+    {
+      "milestone_id": "M9",
+      "title": "Interfaces and heterogeneous exposure",
+      "status": "planned",
+      "dependencies": ["M4", "M5"],
+      "requirement_ids": ["STAB-ENV-007", "STAB-PROP-005"],
+      "next_issue": null,
+      "acceptance_evidence": []
+    },
+    {
+      "milestone_id": "M10",
+      "title": "Periodic surface and electrochemical specialist lanes",
+      "status": "deferred",
+      "dependencies": ["M5", "M9"],
+      "requirement_ids": ["STAB-ENV-008", "STAB-ENV-009"],
+      "next_issue": null,
+      "acceptance_evidence": []
+    },
+    {
+      "milestone_id": "M11",
+      "title": "Prediction-conditioned validation and calibration",
+      "status": "planned",
+      "dependencies": ["M0"],
+      "requirement_ids": [
+        "STAB-BENCH-001", "STAB-BENCH-002", "STAB-BENCH-003",
+        "STAB-BENCH-004", "STAB-BENCH-005"
+      ],
+      "next_issue": null,
+      "acceptance_evidence": ["benchmarks/kinetics/reaction_discovery_manifest.json"]
+    }
+  ],
+  "benchmark_profiles": {
+    "current_storca_gas_contract_regression_v1": {
+      "validation_level": "software_and_workflow_regression",
+      "validation_scope": "Conditional bounded gas workflow contracts, route allocation, repaired-network convergence, failure states, and numerical flux closure. This is not end-to-end experimental validation or proof of mechanism completeness.",
+      "test_files": [
+        "tests/test_stability_lanes.py",
+        "tests/test_stability_verification_wiring.py",
+        "tests/test_verification_engine.py",
+        "tests/test_flux_verification.py",
+        "tests/test_rmg_repair_seeding.py",
+        "tests/test_rmg_export_precision.py",
+        "tests/test_rmg_identity_bridge.py",
+        "tests/test_reaction_correspondence.py",
+        "tests/test_replacement_identity_handoff.py",
+        "tests/test_generated_photolysis_library.py",
+        "tests/test_rmg_bridge_numerics.py",
+        "tests/test_stability_observed_failures.py"
+      ],
+      "benchmark_manifests": [
+        "benchmarks/kinetics/reaction_discovery_manifest.json",
+        "benchmarks/stability/observed_failure_profiles.json"
+      ],
+      "limitation_section": "LIMITATIONS.md"
+    },
+    "implicit_solution_unimolecular_analytical_regression_v1": {
+      "validation_level": "software_and_analytical_regression",
+      "validation_scope": "Dark neutral first-order implicit-solution propagation, solvent-consistent path evidence, analytical t95 sensitivity, uncertainty bounds, fail-closed applicability, and append-only allocation. This is not broad experimental solution validation.",
+      "test_files": [
+        "tests/test_stability_lanes.py",
+        "tests/test_solution_stability.py",
+        "tests/test_solution_path_verification.py",
+        "tests/test_solution_verification_session.py",
+        "tests/test_solution_campaign_adapter.py"
+      ],
+      "benchmark_manifests": [],
+      "limitation_section": "LIMITATIONS.md"
+    },
+    "implicit_solution_mass_action_analytical_regression_v1": {
+      "validation_level": "software_and_analytical_regression",
+      "validation_scope": "Dark neutral ideal-activity first/second-order homogeneous-solution mass action, reversible target reformation, dimensional rates, diffusion ceilings, stiffness escalation, uncertainty scenarios, and conservation closure. This is not experimental validation or evidence of broad solution mechanism coverage.",
+      "test_files": [
+        "tests/test_stability_lanes.py",
+        "tests/test_solution_mass_action.py"
+      ],
+      "benchmark_manifests": [],
+      "limitation_section": "LIMITATIONS.md"
+    },
+    "surface_resolution_profiles_v1": {
+      "validation_level": "software_regression_profiles_live_scientific_validation_pending",
+      "validation_scope": "Bounded unresolved-surface diagnosis, stationary recovery, guided TS seeding, intermediate identity, independent elementary segmentation, multistep rate/network handoff, precise abstention, and budget/restart contracts. Synthetic tests do not validate chemical accuracy; all five retained scientific profiles remain open.",
+      "test_files": [
+        "tests/test_surface_resolution.py",
+        "tests/test_intermediate_identity.py",
+        "tests/test_generic_reaction_path.py",
+        "tests/test_verification_adapters.py",
+        "tests/test_verification_engine.py"
+      ],
+      "benchmark_manifests": [
+        "benchmarks/stability/surface_resolution_profiles.json"
+      ],
+      "limitation_section": "LIMITATIONS.md"
+    }
+  },
+  "lane_support": [
+    {
+      "lane_id": "gas-dry-air-v1",
+      "environment_kind": "homogeneous_gas",
+      "support_level": "observable_supported",
+      "benchmark_profile": "current_storca_gas_contract_regression_v1",
+      "roadmap_milestones": ["M1", "M2", "M6", "M11"]
+    },
+    {
+      "lane_id": "gas-dry-inert-v1",
+      "environment_kind": "homogeneous_gas",
+      "support_level": "observable_supported",
+      "benchmark_profile": "current_storca_gas_contract_regression_v1",
+      "roadmap_milestones": ["M1", "M2", "M6", "M11"]
+    },
+    {
+      "lane_id": "gas-humid-air-v1",
+      "environment_kind": "homogeneous_gas",
+      "support_level": "observable_supported",
+      "benchmark_profile": "current_storca_gas_contract_regression_v1",
+      "roadmap_milestones": ["M1", "M2", "M6", "M11"]
+    },
+    {
+      "lane_id": "gas-low-pressure-thermal-v1",
+      "environment_kind": "homogeneous_gas",
+      "support_level": "observable_supported",
+      "benchmark_profile": "current_storca_gas_contract_regression_v1",
+      "roadmap_milestones": ["M1", "M2", "M6", "M11"]
+    },
+    {
+      "lane_id": "gas-sunlight-dry-air-v1",
+      "environment_kind": "illuminated_homogeneous_gas",
+      "support_level": "observable_supported",
+      "benchmark_profile": "current_storca_gas_contract_regression_v1",
+      "roadmap_milestones": ["M1", "M2", "M8", "M11"]
+    },
+    {
+      "lane_id": "gas-sunlight-humid-air-v1",
+      "environment_kind": "illuminated_homogeneous_gas",
+      "support_level": "observable_supported",
+      "benchmark_profile": "current_storca_gas_contract_regression_v1",
+      "roadmap_milestones": ["M1", "M2", "M8", "M11"]
+    },
+    {
+      "lane_id": "solution-neutral-implicit-v1",
+      "environment_kind": "homogeneous_solution",
+      "support_level": "observable_supported",
+      "benchmark_profile": "implicit_solution_unimolecular_analytical_regression_v1",
+      "roadmap_milestones": ["M1", "M2", "M3", "M4", "M11"]
+    },
+    {
+      "lane_id": "solution-neutral-implicit-mass-action-v1",
+      "environment_kind": "homogeneous_solution",
+      "support_level": "observable_supported",
+      "benchmark_profile": "implicit_solution_mass_action_analytical_regression_v1",
+      "roadmap_milestones": ["M1", "M4", "M11"]
+    },
+    {
+      "lane_id": "solution-assisted-microsolvation-v1",
+      "environment_kind": "microsolvated_solution",
+      "support_level": "declared_only",
+      "benchmark_profile": null,
+      "roadmap_milestones": ["M7"]
+    },
+    {
+      "lane_id": "surface-periodic-v1",
+      "environment_kind": "periodic_surface",
+      "support_level": "declared_only",
+      "benchmark_profile": null,
+      "roadmap_milestones": ["M10"]
+    },
+    {
+      "lane_id": "electrochemical-interface-v1",
+      "environment_kind": "electrochemical_interface",
+      "support_level": "declared_only",
+      "benchmark_profile": null,
+      "roadmap_milestones": ["M10"]
+    }
+  ]
+}

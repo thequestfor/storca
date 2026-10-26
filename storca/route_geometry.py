@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -60,7 +61,16 @@ def _build_endpoint_side(smiles: tuple[str, ...]) -> _EndpointSide:
     charges: list[int] = []
     multiplicities: list[int] = []
     for fragment_index, value in enumerate(smiles):
-        molecule = Chem.MolFromSmiles(value)
+        # RDKit's default parser removes attached explicit H, including their
+        # atom-map labels. Keep the historical ordering for ordinary/heavy-only
+        # SMILES, but never discard an explicitly supplied hydrogen identity.
+        parameters = Chem.SmilesParserParams()
+        parameters.removeHs = False
+        preserved = Chem.MolFromSmiles(value, parameters)
+        molecule = (preserved if preserved is not None and any(
+            atom.GetAtomicNum() == 1 and atom.GetAtomMapNum() > 0
+            for atom in preserved.GetAtoms()
+        ) else Chem.MolFromSmiles(value))
         if molecule is None:
             raise ValueError(f"Invalid endpoint SMILES: {value}")
         explicit = Chem.AddHs(molecule)
@@ -331,6 +341,49 @@ def _mapped_smiles_numbers(reactants: _EndpointSide, products: _EndpointSide) ->
     return {index: product_by_number[number] for index, number in enumerate(left)}
 
 
+def _complete_smiles_atom_mapping(reactants: _EndpointSide, products: _EndpointSide) -> dict | None:
+    """Honor supplied nuclear identities, rather than rematching labelled H.
+
+    Heavy-only maps retain the bounded legacy hydrogen extension. Once an H
+    map is declared, both sides must supply a complete bijection over nuclei;
+    partial/duplicate labels must not silently degrade to automatic mapping.
+    """
+    left_atoms = [atom for molecule in reactants.explicit_molecules for atom in molecule.GetAtoms()]
+    right_atoms = [atom for molecule in products.explicit_molecules for atom in molecule.GetAtoms()]
+    if not any(atom.GetAtomicNum() == 1 and atom.GetAtomMapNum() > 0
+               for atom in (*left_atoms, *right_atoms)):
+        return None
+    left = [atom.GetAtomMapNum() for atom in left_atoms]
+    right = [atom.GetAtomMapNum() for atom in right_atoms]
+    if not all(left) or not all(right):
+        return {"valid": False, "status": "incomplete_explicit_nuclear_atom_maps"}
+    if len(set(left)) != len(left) or len(set(right)) != len(right):
+        return {"valid": False, "status": "duplicate_explicit_nuclear_atom_maps"}
+    if set(left) != set(right):
+        return {"valid": False, "status": "unbalanced_explicit_nuclear_atom_maps"}
+    by_number = {number: index for index, number in enumerate(right)}
+    mapping = {index: by_number[number] for index, number in enumerate(left)}
+    if any(reactants.elements[a] != products.elements[b]
+           or reactants.isotopes[a] != products.isotopes[b] for a, b in mapping.items()):
+        return {"valid": False, "status": "explicit_nuclear_atom_map_element_or_isotope_mismatch"}
+    skeleton = {reactants.explicit_to_skeleton[a]: products.explicit_to_skeleton[b]
+                for a, b in mapping.items() if a in reactants.explicit_to_skeleton}
+    transfers = []
+    for hydrogen, donor in sorted(reactants.hydrogen_parent.items()):
+        mapped = mapping[hydrogen]
+        acceptor = products.hydrogen_parent.get(mapped)
+        if (mapping.get(donor) if donor is not None else None) != acceptor:
+            transfers.append({
+                "reactant_hydrogen_index": hydrogen, "product_hydrogen_index": mapped,
+                "reactant_donor_index": donor, "product_acceptor_index": acceptor,
+                "reactant_fragment_index": reactants.explicit_fragment[hydrogen],
+                "product_fragment_index": products.explicit_fragment[mapped],
+                "isotope": reactants.isotopes[hydrogen],
+            })
+    return {"valid": True, "status": "resolved", "mapping": mapping,
+            "skeleton_mapping": skeleton, "hydrogen_transfers": transfers}
+
+
 def _automatic_skeleton_mapping(
     reactants: _EndpointSide,
     products: _EndpointSide,
@@ -391,18 +444,22 @@ def _automatic_skeleton_mapping(
     left_bonds = _skeleton_bonds(reactants)
     right_bonds = _skeleton_bonds(products)
     best_cost = math.inf
-    # We need every equal-cost candidate to distinguish a harmless endpoint
-    # symmetry from genuinely different reaction channels.  The cap is a
-    # safety bound: if the equivalence class itself is too large, require an
-    # explicit map rather than silently choosing from a combinatorial space.
-    max_equal_best_mappings = 64
-    best: list[dict[int, int]] = []
-    best_overflow = False
+    # Equal-cost mappings are classified online by true endpoint graph
+    # symmetry.  Retaining every permutation made large but harmless symmetry
+    # classes (for example two identical tert-butoxy radicals) fail merely
+    # because an arbitrary storage cap was reached.  One representative per
+    # distinct symmetry class is sufficient to distinguish equivalent atom
+    # identities from genuinely different reaction channels.  The bounded
+    # search-state limit remains the fail-closed combinatorial guard.
+    best_representatives: list[dict[int, int]] = []
+    best_samples: list[dict[int, int]] = []
+    best_mapping_count = 0
+    canonical_best: dict[int, int] | None = None
     states = 0
     exhausted = False
 
     def visit(position: int, mapping: dict[int, int], used: set[int], cost: float) -> None:
-        nonlocal best_cost, best, best_overflow, states, exhausted
+        nonlocal best_cost, best_representatives, best_samples, best_mapping_count, canonical_best, states, exhausted
         if exhausted:
             return
         states += 1
@@ -413,12 +470,26 @@ def _automatic_skeleton_mapping(
             return
         if position == len(order):
             if cost < best_cost - 1e-9:
-                best_cost, best = cost, [dict(mapping)]
+                candidate = dict(mapping)
+                best_cost = cost
+                best_representatives = [candidate]
+                best_samples = [candidate]
+                best_mapping_count = 1
+                canonical_best = candidate
             elif abs(cost - best_cost) <= 1e-9:
-                if len(best) < max_equal_best_mappings:
-                    best.append(dict(mapping))
-                else:
-                    best_overflow = True
+                candidate = dict(mapping)
+                best_mapping_count += 1
+                if len(best_samples) < 64:
+                    best_samples.append(candidate)
+                if canonical_best is None or tuple(
+                    candidate[index] for index in range(len(left_atoms))
+                ) < tuple(canonical_best[index] for index in range(len(left_atoms))):
+                    canonical_best = candidate
+                if not any(
+                    _maps_are_symmetry_equivalent(reactants, products, representative, candidate)
+                    for representative in best_representatives
+                ):
+                    best_representatives.append(candidate)
             return
         left = order[position]
         for atom_cost, right in candidates[left]:
@@ -447,42 +518,43 @@ def _automatic_skeleton_mapping(
             "search_states": states,
             "max_search_states": max_search_states,
         }
-    if not best:
+    if not best_representatives or canonical_best is None:
         return {"status": "atom_mapping_unresolved", "valid": False, "search_states": states}
-    if best_overflow:
+    if len(best_representatives) == 1 and best_mapping_count > 1:
         return {
-            "status": "mapping_symmetry_class_exhausted",
-            "valid": False,
+            "status": "resolved",
+            "valid": True,
+            "source": "automatic_minimum_graph_edit_symmetry_canonicalized",
             "mapping_cost": best_cost,
             "search_states": states,
-            "retained_equal_cost_mappings": len(best),
-            "maximum_retained_equal_cost_mappings": max_equal_best_mappings,
+            "mapping": canonical_best,
+            "symmetry_resolution": {
+                "status": "equivalent_endpoint_symmetry_canonicalized",
+                "equivalent_mapping_count": best_mapping_count,
+                "symmetry_class_count": 1,
+                "canonical_mapping": sorted([left, right] for left, right in canonical_best.items()),
+                "equivalent_mappings": [
+                    sorted([left, right] for left, right in item.items())
+                    for item in best_samples
+                ],
+                "equivalent_mappings_complete": len(best_samples) == best_mapping_count,
+                "symmetry_class_representatives": [
+                    sorted([left, right] for left, right in best_representatives[0].items())
+                ],
+            },
         }
-    if len(best) > 1:
-        canonical = min(best, key=lambda item: tuple(item[index] for index in range(len(left_atoms))))
-        if all(_maps_are_symmetry_equivalent(reactants, products, canonical, item) for item in best):
-            return {
-                "status": "resolved",
-                "valid": True,
-                "source": "automatic_minimum_graph_edit_symmetry_canonicalized",
-                "mapping_cost": best_cost,
-                "search_states": states,
-                "mapping": canonical,
-                "symmetry_resolution": {
-                    "status": "equivalent_endpoint_symmetry_canonicalized",
-                    "equivalent_mapping_count": len(best),
-                    "canonical_mapping": sorted([left, right] for left, right in canonical.items()),
-                    "equivalent_mappings": [
-                        sorted([left, right] for left, right in item.items()) for item in best
-                    ],
-                },
-            }
+    if len(best_representatives) > 1:
         return {
             "status": "ambiguous_atom_mapping",
             "valid": False,
             "mapping_cost": best_cost,
             "search_states": states,
-            "candidate_mappings": [sorted([left, right] for left, right in item.items()) for item in best],
+            "equal_cost_mapping_count": best_mapping_count,
+            "symmetry_class_count": len(best_representatives),
+            "candidate_mappings": [
+                sorted([left, right] for left, right in item.items())
+                for item in best_representatives
+            ],
         }
     return {
         "status": "resolved",
@@ -490,7 +562,7 @@ def _automatic_skeleton_mapping(
         "source": "automatic_minimum_graph_edit",
         "mapping_cost": best_cost,
         "search_states": states,
-        "mapping": best[0],
+        "mapping": canonical_best,
     }
 
 
@@ -729,10 +801,28 @@ def resolve_route_atom_mapping(route: RouteSpec, *, max_search_states: int = 200
     surface = resolve_route_surface(route, reactants, products)
     if not surface["valid"]:
         return {**surface, "surface": surface}
+    if route.atom_mapping_evidence:
+        from .rmg_mapping import validate_recipe_mapping
+        try:
+            validate_recipe_mapping(route)
+        except (ValueError, KeyError, OSError, TypeError) as error:
+            return {"status": "source_atom_mapping_evidence_invalid", "valid": False,
+                    "reason": str(error), "surface": surface}
+    complete = _complete_smiles_atom_mapping(reactants, products)
+    if complete is not None:
+        if not complete["valid"]:
+            return {**complete, "surface": surface, "source": "complete_SMILES_nuclear_atom_map_numbers"}
+        if route.atom_mapping and dict(route.atom_mapping) != complete["skeleton_mapping"]:
+            return {"valid": False, "status": "explicit_nuclear_and_skeleton_atom_maps_conflict",
+                    "surface": surface}
     source = None
-    if route.atom_mapping:
+    if complete is not None:
+        skeleton_mapping = complete["skeleton_mapping"]
+        source = "complete_SMILES_nuclear_atom_map_numbers"
+    elif route.atom_mapping:
         skeleton_mapping = dict(route.atom_mapping)
-        source = "RouteSpec.atom_mapping"
+        source = ("rmg_family_recipe_atom_trace" if route.atom_mapping_evidence
+                  else "RouteSpec.atom_mapping")
     else:
         skeleton_mapping = _mapped_smiles_numbers(reactants, products)
         source = "SMILES_atom_map_numbers" if skeleton_mapping is not None else None
@@ -750,7 +840,7 @@ def resolve_route_atom_mapping(route: RouteSpec, *, max_search_states: int = 200
     mapping_error = _validate_skeleton_mapping(reactants, products, skeleton_mapping)
     if mapping_error:
         return {"status": mapping_error, "valid": False, "surface": surface, "source": source}
-    extended = _extend_hydrogen_mapping(reactants, products, skeleton_mapping)
+    extended = complete if complete is not None else _extend_hydrogen_mapping(reactants, products, skeleton_mapping)
     if not extended["valid"]:
         return {**extended, "surface": surface, "source": source}
     all_mapping = extended["mapping"]
@@ -760,6 +850,7 @@ def resolve_route_atom_mapping(route: RouteSpec, *, max_search_states: int = 200
         "status": "resolved",
         "valid": True,
         "source": source,
+        **({"source_evidence": route.atom_mapping_evidence} if route.atom_mapping_evidence else {}),
         "skeleton_atom_mapping": sorted([left, right] for left, right in skeleton_mapping.items()),
         "all_atom_mapping": sorted([left, right] for left, right in all_mapping.items()),
         "reactant_skeleton_atom_count": reactants.skeleton_count,
@@ -815,6 +906,158 @@ def _graph_component_count(atom_count: int, bonds: set[tuple[int, int]]) -> int:
     return count
 
 
+def _resolve_ring_diagonal_contacts(side, mapping, coordinates, contacts):
+    """Corroborate near contacts across declared four-rings, never new bonds.
+
+    Distance alone mistakes strained-ring diagonals for potential extra bonds.
+    Resolve only closed-shell, intrafragment four-ring diagonals when independent
+    coordinate-based perception matches every atom-ordered bond/order, charge
+    and radical count of that fragment. All other contacts remain unresolved.
+    """
+    from rdkit import Chem
+    from rdkit.Chem import rdDetermineBonds
+    from rdkit import rdBase
+
+    inverse = {actual: declared for declared, actual in mapping.items()}
+    neighbours = {index: set() for index in range(len(side.elements))}
+    for left, right in side.bonds:
+        neighbours[left].add(right)
+        neighbours[right].add(left)
+    eligible = {}
+    for contact in contacts:
+        left, right = (inverse[index] for index in contact["atom_indices"])
+        fragment = side.explicit_fragment[left]
+        common = sorted(neighbours[left] & neighbours[right])
+        if (fragment == side.explicit_fragment[right]
+                and side.inferred_multiplicities[fragment] == 1
+                and side.elements[left] != "H" and side.elements[right] != "H"
+                and len(common) >= 2):
+            eligible.setdefault(fragment, []).append((contact, common))
+
+    resolved, checks = [], []
+    for fragment, candidates in sorted(eligible.items()):
+        declared_indices = [index for index, owner in enumerate(side.explicit_fragment) if owner == fragment]
+        molecule = side.explicit_molecules[fragment]
+        expected_bonds = {
+            tuple(sorted((bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()))): _bond_value(bond)
+            for bond in molecule.GetBonds()
+        }
+        record = {
+            "fragment_index": fragment, "declared_smiles": side.smiles[fragment],
+            "backend": "rdkit.DetermineBonds.connect_the_dots",
+            "rdkit_version": rdBase.rdkitVersion,
+            "maximum_bond_order_iterations": 1000,
+            "declared_charge": side.formal_charges[fragment],
+            "path_claim_allowed": False, "rate_claim_allowed": False,
+        }
+        block = [str(len(declared_indices)), "Coordinate-only ring diagonal diagnostic"]
+        for declared in declared_indices:
+            x, y, z = coordinates[mapping[declared]]
+            block.append(f"{side.elements[declared]} {x:.12f} {y:.12f} {z:.12f}")
+        try:
+            perceived = Chem.MolFromXYZBlock("\n".join(block) + "\n")
+            if perceived is None:
+                raise ValueError("Coordinate-only fragment could not be parsed")
+            rdDetermineBonds.DetermineBonds(
+                perceived, charge=int(side.formal_charges[fragment]),
+                useHueckel=False, useVdw=False, allowChargedFragments=True,
+                embedChiral=False, maxIterations=1000,
+            )
+            Chem.SanitizeMol(perceived)
+            actual_bonds = {
+                tuple(sorted((bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()))): _bond_value(bond)
+                for bond in perceived.GetBonds()
+            }
+            record["perceived_atom_ordered_bonds"] = [
+                {"atom_indices": list(pair), "order": order} for pair, order in sorted(actual_bonds.items())
+            ]
+            atom_states_match = perceived.GetNumAtoms() == molecule.GetNumAtoms() and all(
+                (actual.GetAtomicNum(), actual.GetFormalCharge(), actual.GetNumRadicalElectrons())
+                == (expected.GetAtomicNum(), expected.GetFormalCharge(), expected.GetNumRadicalElectrons())
+                for actual, expected in zip(perceived.GetAtoms(), molecule.GetAtoms())
+            )
+            if actual_bonds != expected_bonds or not atom_states_match:
+                record["status"] = "perceived_graph_mismatch"
+            else:
+                record["status"] = "exact_atom_ordered_graph_match"
+                resolved.extend({
+                    **contact,
+                    "common_neighbour_atom_indices": [mapping[index] for index in common],
+                    "resolution": "nonbonded_ring_diagonal_with_exact_coordinate_graph_match",
+                    "fragment_index": fragment,
+                } for contact, common in candidates)
+        except Exception as error:
+            record.update(status="graph_assignment_unresolved", reason=f"{type(error).__name__}: {error}")
+        checks.append(record)
+    return resolved, checks
+
+
+def _declared_stereochemistry_check(side, mapping, coordinates):
+    """Check only declared stereo using its graph and isotope-labelled order.
+
+    This is geometric corroboration conditional on declared connectivity, not
+    an independent bond-order, isotope, charge or electronic-state assignment.
+    """
+    from rdkit import Chem, rdBase
+
+    checks = []
+    supported_tags = {Chem.ChiralType.CHI_TETRAHEDRAL_CW, Chem.ChiralType.CHI_TETRAHEDRAL_CCW}
+    specified_bond_stereo = {Chem.BondStereo.STEREOE, Chem.BondStereo.STEREOZ,
+                            Chem.BondStereo.STEREOCIS, Chem.BondStereo.STEREOTRANS}
+    offset = 0
+    for fragment, molecule in enumerate(side.explicit_molecules):
+        centers = [atom for atom in molecule.GetAtoms() if atom.GetChiralTag() != Chem.ChiralType.CHI_UNSPECIFIED]
+        bonds = [bond for bond in molecule.GetBonds() if bond.GetStereo() in specified_bond_stereo]
+        if centers or bonds:
+            record = {"fragment_index": fragment, "backend": "rdkit.AssignStereochemistryFrom3D",
+                      "rdkit_version": rdBase.rdkitVersion,
+                      "inference_assumes_declared_bonds_and_isotopes": True,
+                      "atom_checks": [], "bond_checks": []}
+            try:
+                if any(atom.GetChiralTag() not in supported_tags for atom in centers):
+                    raise ValueError("Declared non-tetrahedral stereochemistry requires a specialized check")
+                perceived = Chem.Mol(molecule)
+                Chem.RemoveStereochemistry(perceived)
+                perceived.RemoveAllConformers()
+                conformer = Chem.Conformer(molecule.GetNumAtoms())
+                conformer.Set3D(True)
+                for local in range(molecule.GetNumAtoms()):
+                    point = coordinates[mapping[offset + local]]
+                    conformer.SetAtomPosition(local, tuple(float(value) for value in point))
+                perceived.AddConformer(conformer)
+                Chem.AssignStereochemistryFrom3D(perceived, replaceExistingTags=True)
+                Chem.AssignStereochemistry(perceived, cleanIt=True, force=True)
+                for atom in centers:
+                    observed = perceived.GetAtomWithIdx(atom.GetIdx()).GetChiralTag()
+                    record["atom_checks"].append({
+                        "atom_index": mapping[offset + atom.GetIdx()],
+                        "declared": str(atom.GetChiralTag()), "observed": str(observed),
+                        "matches": observed == atom.GetChiralTag(),
+                    })
+                normalize = lambda stereo: (
+                    "E" if stereo in {Chem.BondStereo.STEREOE, Chem.BondStereo.STEREOTRANS}
+                    else "Z" if stereo in {Chem.BondStereo.STEREOZ, Chem.BondStereo.STEREOCIS}
+                    else "unresolved"
+                )
+                for bond in bonds:
+                    observed = perceived.GetBondWithIdx(bond.GetIdx()).GetStereo()
+                    record["bond_checks"].append({
+                        "atom_indices": [mapping[offset + bond.GetBeginAtomIdx()], mapping[offset + bond.GetEndAtomIdx()]],
+                        "declared": normalize(bond.GetStereo()), "observed": normalize(observed),
+                        "matches": normalize(observed) == normalize(bond.GetStereo()),
+                    })
+                record["status"] = "matched" if all(
+                    item["matches"] for item in [*record["atom_checks"], *record["bond_checks"]]
+                ) else "stereochemistry_mismatch"
+            except Exception as error:
+                record.update(status="stereochemistry_unresolved", reason=f"{type(error).__name__}: {error}")
+            checks.append(record)
+        offset += molecule.GetNumAtoms()
+    valid = all(record["status"] == "matched" for record in checks)
+    return {"valid": valid, "status": ("matched" if checks else "not_declared") if valid else "stereochemistry_not_matched",
+            "declared_only": True, "fragment_checks": checks}
+
+
 def validate_declared_connectivity(
     xyz_path: Path,
     smiles: tuple[str, ...],
@@ -829,22 +1072,34 @@ def validate_declared_connectivity(
     XYZ files contain no bond table, so this is deliberately a conservative
     geometry gate rather than a bond-order assignment.  Declared bonds must
     remain within a liberal covalent-radius envelope, while undeclared pairs
-    inside the covalent or near-covalent envelope fail closed.  Atom order is
+    inside the covalent or near-covalent envelope fail closed. Closed-shell
+    four-ring diagonals in the ambiguous band require an independent exact
+    coordinate-based graph match, not merely a distance exception. Atom order is
     explicit: ``expected_to_xyz`` maps the declared explicit-H order to the XYZ
     order used by an endpoint complex.
     """
     from rdkit import Chem
 
+    thresholds = (expected_bond_max_covalent_ratio, unexpected_bond_ratio, ambiguous_contact_ratio)
+    if (any(not math.isfinite(value) or value <= 0 for value in thresholds)
+            or unexpected_bond_ratio > ambiguous_contact_ratio):
+        return {"status": "invalid_connectivity_thresholds", "valid": False}
     side = _build_endpoint_side(tuple(smiles))
-    elements, coordinates, _ = read_xyz(Path(xyz_path))
+    try:
+        elements, coordinates, _ = read_xyz(Path(xyz_path))
+    except (OSError, ValueError) as error:
+        return {"status": "geometry_unreadable", "valid": False, "reason": str(error)}
     atom_count = len(side.elements)
     if len(elements) != atom_count:
         return {
             "status": "atom_count_mismatch", "valid": False,
             "declared_atom_count": atom_count, "xyz_atom_count": len(elements),
         }
-    mapping = dict(expected_to_xyz or {index: index for index in range(atom_count)})
-    if set(mapping) != set(range(atom_count)) or set(mapping.values()) != set(range(atom_count)):
+    if coordinates.shape != (atom_count, 3) or not np.isfinite(coordinates).all():
+        return {"status": "invalid_geometry_coordinates", "valid": False}
+    mapping = dict({index: index for index in range(atom_count)} if expected_to_xyz is None else expected_to_xyz)
+    if (any(type(index) is not int for index in [*mapping.keys(), *mapping.values()])
+            or set(mapping) != set(range(atom_count)) or set(mapping.values()) != set(range(atom_count))):
         return {
             "status": "invalid_expected_to_xyz_mapping", "valid": False,
             "declared_atom_count": atom_count,
@@ -903,12 +1158,24 @@ def validate_declared_connectivity(
                 # bond, but it is also not safe evidence that the channel was
                 # retained.  Fail closed and request better endpoint evidence.
                 ambiguous_contacts.append(detail)
+    resolved_diagonals, diagonal_checks = [], []
+    if ambiguous_contacts and not (implausible_overlaps or missing_bonds or unexpected_bonds):
+        resolved_diagonals, diagonal_checks = _resolve_ring_diagonal_contacts(
+            side, mapping, coordinates, ambiguous_contacts,
+        )
+        resolved_pairs = {tuple(item["atom_indices"]) for item in resolved_diagonals}
+        ambiguous_contacts = [item for item in ambiguous_contacts if tuple(item["atom_indices"]) not in resolved_pairs]
     if implausible_overlaps or missing_bonds or unexpected_bonds:
         status = "connectivity_changed"
     elif ambiguous_contacts:
         status = "connectivity_ambiguous"
     else:
         status = "validated"
+    stereo = {"status": "blocked_by_connectivity", "valid": False, "fragment_checks": []}
+    if status == "validated":
+        stereo = _declared_stereochemistry_check(side, mapping, coordinates)
+        if not stereo["valid"]:
+            status = "stereochemistry_not_matched"
     valid = status == "validated"
     return {
         "schema_version": 1,
@@ -919,6 +1186,10 @@ def validate_declared_connectivity(
         "declared_smiles": list(smiles),
         "atom_order_aware": True,
         "bond_orders_checked": False,
+        "declared_stereochemistry_check": stereo,
+        "claim_scope": "declared_connectivity_and_stereochemistry_geometry_screen",
+        "stationary_point_claim_allowed": False,
+        "electronic_state_claim_allowed": False,
         "declared_bonds": [list(pair) for pair in sorted(expected_bonds)],
         "inferred_covalent_bonds": [list(pair) for pair in sorted(inferred_bonds)],
         "declared_fragment_count": _graph_component_count(atom_count, expected_bonds),
@@ -926,6 +1197,8 @@ def validate_declared_connectivity(
         "missing_declared_bonds": missing_bonds,
         "unexpected_covalent_bonds": unexpected_bonds,
         "ambiguous_near_covalent_contacts": ambiguous_contacts,
+        "resolved_ring_diagonal_contacts": resolved_diagonals,
+        "ring_diagonal_graph_checks": diagonal_checks,
         "implausible_overlaps": implausible_overlaps,
         "thresholds": {
             "expected_bond_max_covalent_ratio": expected_bond_max_covalent_ratio,
@@ -959,6 +1232,140 @@ def validate_route_endpoint_connectivity(
     return validate_declared_connectivity(
         xyz_path, tuple(smiles), expected_to_xyz=expected_to_xyz,
     )
+
+
+def align_mapping_to_retained_endpoints(
+    route: RouteSpec, reactant_xyz: Path, product_xyz: Path,
+) -> dict:
+    """Align equivalent same-parent hydrogens to a retained path atom order.
+
+    Heavy atoms, isotopes, and donor groups remain fixed. This is endpoint
+    correspondence evidence, not validation of an IRC, electronic state, or rate.
+    """
+    canonical = resolve_route_atom_mapping(route)
+    if not canonical.get("valid"):
+        return canonical
+    reactant_check = validate_route_endpoint_connectivity(
+        route, reactant_xyz, side="reactants", mapping_result=canonical,
+    )
+    if not reactant_check.get("valid"):
+        return {"valid": False, "status": "trace_reactant_identity_unresolved", "check": reactant_check}
+    product_check = validate_route_endpoint_connectivity(
+        route, product_xyz, side="products", mapping_result=canonical,
+    )
+    if product_check.get("ambiguous_near_covalent_contacts") or product_check.get("implausible_overlaps"):
+        return {"valid": False, "status": "trace_product_connectivity_ambiguous", "check": product_check}
+    if canonical.get("source") == "complete_SMILES_nuclear_atom_map_numbers":
+        # Supplied nuclear identities may not be permuted until a path fits.
+        if not product_check.get("valid"):
+            return {"valid": False, "status": "trace_explicit_nuclear_mapping_mismatch",
+                    "check": product_check}
+        return {**canonical, "trace_alignment": {
+            "kind": "supplied_all_nuclei_identity_preserved", "changed_reactant_indices": [],
+            "reactant_xyz_sha256": hashlib.sha256(Path(reactant_xyz).read_bytes()).hexdigest(),
+            "product_xyz_sha256": hashlib.sha256(Path(product_xyz).read_bytes()).hexdigest(),
+            "reactant_check": reactant_check, "product_check": product_check,
+            "claims_prohibited": ["verified_path", "electronic_state_validated", "rate", "lifetime"],
+        }}
+    reactants = _build_endpoint_side(route.reactant_smiles)
+    products = _build_endpoint_side(route.product_smiles)
+    original = {int(left): int(right) for left, right in canonical["all_atom_mapping"]}
+    aligned = dict(original)
+    observed_neighbours: dict[int, list[int]] = {}
+    for left, right in product_check.get("inferred_covalent_bonds") or ():
+        observed_neighbours.setdefault(left, []).append(right)
+        observed_neighbours.setdefault(right, []).append(left)
+    groups: dict[tuple[int, int], list[int]] = {}
+    for hydrogen, parent in reactants.hydrogen_parent.items():
+        if parent is None:
+            return {"valid": False, "status": "trace_free_hydrogen_mapping_requires_escalation"}
+        groups.setdefault((parent, reactants.isotopes[hydrogen]), []).append(hydrogen)
+    for (_, isotope), hydrogens in sorted(groups.items()):
+        available = {original[hydrogen] for hydrogen in hydrogens}
+        for hydrogen in sorted(hydrogens):
+            neighbours = observed_neighbours.get(hydrogen) or []
+            if len(neighbours) != 1 or reactants.elements[neighbours[0]] == "H":
+                return {"valid": False, "status": "trace_hydrogen_attachment_unresolved", "atom_index": hydrogen}
+            expected_parent = original[neighbours[0]]
+            matches = sorted(product_h for product_h in available
+                             if products.hydrogen_parent.get(product_h) == expected_parent
+                             and products.isotopes[product_h] == isotope)
+            if not matches:
+                return {"valid": False, "status": "trace_requires_non_equivalent_atom_reassignment",
+                        "atom_index": hydrogen}
+            aligned[hydrogen] = matches[0]
+            available.remove(matches[0])
+    if set(aligned.values()) != set(original.values()):
+        return {"valid": False, "status": "trace_atom_mapping_not_bijective"}
+    result = {**canonical, "all_atom_mapping": sorted([left, right] for left, right in aligned.items())}
+    final_check = validate_route_endpoint_connectivity(
+        route, product_xyz, side="products", mapping_result=result,
+    )
+    if not final_check.get("valid"):
+        return {"valid": False, "status": "trace_product_identity_unresolved", "check": final_check}
+    transfers = []
+    for hydrogen, donor in sorted(reactants.hydrogen_parent.items()):
+        product_h = aligned[hydrogen]
+        acceptor = products.hydrogen_parent.get(product_h)
+        if aligned[donor] != acceptor:
+            transfers.append({
+                "reactant_hydrogen_index": hydrogen, "product_hydrogen_index": product_h,
+                "reactant_donor_index": donor, "product_acceptor_index": acceptor,
+                "reactant_fragment_index": reactants.explicit_fragment[hydrogen],
+                "product_fragment_index": products.explicit_fragment[product_h],
+                "isotope": reactants.isotopes[hydrogen],
+            })
+    result.update(
+        source="retained_endpoint_hydrogen_symmetry_alignment",
+        hydrogen_transfers=transfers,
+        trace_alignment={
+            "kind": "same_parent_same_isotope_hydrogen_permutation",
+            "canonical_mapping_source": canonical["source"],
+            "canonical_all_atom_mapping": canonical["all_atom_mapping"],
+            "changed_reactant_indices": [left for left in sorted(original) if original[left] != aligned[left]],
+            "reactant_xyz_sha256": hashlib.sha256(Path(reactant_xyz).read_bytes()).hexdigest(),
+            "product_xyz_sha256": hashlib.sha256(Path(product_xyz).read_bytes()).hexdigest(),
+            "reactant_check": reactant_check, "product_check": final_check,
+            "claims_prohibited": ["verified_path", "electronic_state_validated", "rate", "lifetime"],
+        },
+    )
+    return result
+
+
+def retained_endpoint_fragment_geometries(
+    route: RouteSpec, reactant_xyz: Path, product_xyz: Path,
+) -> dict:
+    """Extract declared fragment order from retained endpoints without moving atoms.
+
+    The returned seeds require optimization and frequency/state checks. They
+    are not isolated-species energies or evidence of stationary minima.
+    """
+    mapping = align_mapping_to_retained_endpoints(route, reactant_xyz, product_xyz)
+    if not mapping.get("valid"):
+        return {"valid": False, "status": "retained_endpoint_mapping_unresolved", "mapping": mapping}
+    inverse = {right: left for left, right in mapping["all_atom_mapping"]}
+    fragments = {}
+    for side, smiles_values, path in (
+        ("reactants", route.reactant_smiles, reactant_xyz),
+        ("products", route.product_smiles, product_xyz),
+    ):
+        endpoint = _build_endpoint_side(smiles_values)
+        elements, coordinates, _ = read_xyz(path)
+        fragments[side] = []
+        for index, smiles in enumerate(smiles_values):
+            declared_indices = [i for i, fragment in enumerate(endpoint.explicit_fragment) if fragment == index]
+            source_indices = [inverse[i] if side == "products" else i for i in declared_indices]
+            fragments[side].append({
+                "smiles": smiles,
+                "elements": [elements[i] for i in source_indices],
+                "coordinates": coordinates[source_indices].tolist(),
+                "source_atom_indices": source_indices,
+                "source_xyz": str(path),
+                "source_xyz_sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest(),
+            })
+    return {"valid": True, "status": "retained_fragment_seeds_resolved",
+            "mapping": mapping, "fragments": fragments,
+            "claims_prohibited": ["validated_minimum", "validated_electronic_state", "rate", "lifetime"]}
 
 
 def validate_route_mapping(route: RouteSpec) -> dict:
@@ -1122,6 +1529,13 @@ def _embed_fragment(molecule: Any, *, random_seed: int) -> np.ndarray:
         pass
     coordinates = np.asarray(embedded.GetConformer().GetPositions(), dtype=float)
     return coordinates - coordinates.mean(axis=0)
+
+
+def write_declared_fragment_seed(smiles: str, path: Path) -> Path:
+    """Create a proposal in exactly the explicit-nucleus route-map order."""
+    side = _build_endpoint_side((smiles,))
+    coordinates = _embed_fragment(side.explicit_molecules[0], random_seed=1729)
+    return write_xyz(path, side.elements, coordinates, "STORCA atom-ordered declared fragment seed")
 
 
 def _explicit_fragment_offsets(side: _EndpointSide) -> list[int]:
@@ -1455,28 +1869,62 @@ def aligned_rmsd(reference: np.ndarray, candidate: np.ndarray) -> float:
     return float(np.sqrt(np.mean(np.sum((aligned - ref) ** 2, axis=1))))
 
 
+def validate_trajectory_frames(frames, *, expected_elements=None):
+    """Validate nucleus order and finite coordinates, not a chemical pathway."""
+    if len(frames) < 2:
+        return {"status": "trajectory_has_fewer_than_two_frames", "valid": False}
+    elements = list(expected_elements if expected_elements is not None else frames[0][0])
+    if not elements:
+        return {"status": "trajectory_has_no_atoms", "valid": False}
+    for index, (labels, coordinates, _) in enumerate(frames):
+        if list(labels) != elements:
+            return {"status": "trajectory_atom_order_mismatch", "valid": False, "frame_index": index}
+        if coordinates.shape != (len(elements), 3) or not np.isfinite(coordinates).all():
+            return {"status": "trajectory_coordinates_invalid", "valid": False, "frame_index": index}
+    return {"status": "validated_frame_integrity", "valid": True, "frame_count": len(frames),
+            "claim_scope": "nucleus_order_and_finite_coordinates_only"}
+
+
 def validate_trajectory_endpoints(trajectory_xyz: Path, reactant_xyz: Path, product_xyz: Path,
                                   *, rmsd_tolerance_angstrom: float = 0.75) -> dict:
-    """Require the two trajectory ends to pair with the declared endpoints."""
+    """Require both ends to pass separately; coordinate agreement is not identity."""
     from .decomposition_visuals import xyz_frames
 
-    frames = xyz_frames(trajectory_xyz)
-    reactant_elements, reactant, _ = read_xyz(reactant_xyz)
-    product_elements, product, _ = read_xyz(product_xyz)
-    if frames[0][0] != reactant_elements or frames[-1][0] != reactant_elements:
-        return {"status": "element_order_mismatch", "valid": False}
+    if not math.isfinite(rmsd_tolerance_angstrom) or rmsd_tolerance_angstrom <= 0:
+        return {"status": "invalid_rmsd_tolerance", "valid": False}
+    try:
+        frames = xyz_frames(trajectory_xyz)
+        reactant_elements, reactant, _ = read_xyz(reactant_xyz)
+        product_elements, product, _ = read_xyz(product_xyz)
+    except (OSError, ValueError) as error:
+        return {"status": "trajectory_geometry_unreadable", "valid": False, "reason": str(error)}
     if product_elements != reactant_elements:
         return {"status": "reference_element_order_mismatch", "valid": False}
-    forward = aligned_rmsd(reactant, frames[0][1]) + aligned_rmsd(product, frames[-1][1])
-    reverse = aligned_rmsd(reactant, frames[-1][1]) + aligned_rmsd(product, frames[0][1])
-    selected = "forward" if forward <= reverse else "reverse"
-    pair = forward if forward <= reverse else reverse
+    if any(points.shape != (len(reactant_elements), 3) or not np.isfinite(points).all()
+           for points in (reactant, product)):
+        return {"status": "reference_geometry_coordinates_invalid", "valid": False}
+    integrity = validate_trajectory_frames(frames, expected_elements=reactant_elements)
+    if not integrity["valid"]:
+        return integrity
+    directions = {}
+    for direction, first, last in (("forward", frames[0][1], frames[-1][1]),
+                                   ("reverse", frames[-1][1], frames[0][1])):
+        distances = (aligned_rmsd(reactant, first), aligned_rmsd(product, last))
+        directions[direction] = {"reactant_rmsd_angstrom": distances[0], "product_rmsd_angstrom": distances[1],
+                                 "valid": all(value <= rmsd_tolerance_angstrom for value in distances)}
+    admissible = [direction for direction, check in directions.items() if check["valid"]]
+    selected = min(admissible or list(directions), key=lambda direction: sum(
+        directions[direction][key] for key in ("reactant_rmsd_angstrom", "product_rmsd_angstrom")))
+    pair = sum(directions[selected][key] for key in ("reactant_rmsd_angstrom", "product_rmsd_angstrom"))
     return {
-        "status": "validated" if pair <= 2 * rmsd_tolerance_angstrom else "endpoint_mismatch",
-        "valid": pair <= 2 * rmsd_tolerance_angstrom,
+        "status": "validated" if admissible else "endpoint_mismatch",
+        "valid": bool(admissible),
         "orientation": selected,
         "paired_rmsd_sum_angstrom": pair,
         "per_endpoint_rmsd_tolerance_angstrom": rmsd_tolerance_angstrom,
+        "direction_checks": directions, "trajectory_integrity": integrity,
+        "claim_scope": "coordinate_correspondence_only",
+        "chemical_identity_claim_allowed": False,
     }
 
 

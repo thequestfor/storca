@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "storca_reaction_discovery_benchmark_manifest",
+  "scope": "Candidate-recall fixtures for bounded graph/xTB and retained RMG discovery; not rate or mechanism-validation benchmarks.",
+  "cases": [
+    {
+      "id": "ethane-homolysis-connectivity",
+      "system": {"smiles": "CC", "charge": 0, "multiplicity": 1},
+      "expected_reactions": [
+        {"reactants": ["CC"], "products": ["[CH3]", "[CH3]"], "total_charge": 0}
+      ],
+      "notes": "A graph-edit reachability fixture only. It does not assert that closed-shell ethane homolysis is important at any condition."
+    },
+    {
+      "id": "propane-ring-closure-connectivity",
+      "system": {"smiles": "CCC", "charge": 0, "multiplicity": 1},
+      "expected_reactions": [
+        {"reactants": ["CCC"], "products": ["C1CC1"], "total_charge": 0}
+      ],
+      "notes": "Tests one intramolecular single-bond-formation proposal; no barrier or kinetics claim is implied."
+    }
+  ]
+}

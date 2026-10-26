@@ -40,6 +40,14 @@ directory rather than cluttering the repository root.
 
 The staged plan for advancing from harmonic calculations to condition-matched
 experimental-spectrum predictions is documented in [ROADMAP.md](ROADMAP.md).
+The stability and chemical-fate program has its own
+[scientific roadmap](STABILITY_ROADMAP.md),
+[requirement catalog](docs/stability/REQUIREMENTS.md),
+[traceability matrix](docs/stability/TRACEABILITY.md), and
+[definition of a supported lane](docs/stability/DEFINITION_OF_SUPPORTED.md).
+The machine-readable roadmap manifest is retained at
+[`benchmarks/stability/milestones.json`](benchmarks/stability/milestones.json)
+and is checked against the runtime lane registry by the test suite.
 
 ## Quick start
 
@@ -500,6 +508,83 @@ empirical FWHM.
 
 ## RMG stability screen
 
+The current implementation status and dependency-ordered expansion plan are
+tracked in [STABILITY_ROADMAP.md](STABILITY_ROADMAP.md). Registration, software
+implementation, scientific validation, and observable support are deliberately
+different states; adding a program or lane declaration does not promote a
+scientific capability.
+
+Prepare a multi-environment campaign without launching chemistry calculations:
+
+```bash
+storca stability-campaign \
+  --request examples/stability-campaign/gas-and-solution.json \
+  --campaign-dir runs/campaign-preparation
+```
+
+Schema version 1 validates a shared molecular system, lane-specific
+environments, observables, methods, evidence references, applicability flags,
+and compute ceilings. It writes `campaign-request.json`, `campaign-plan.json`,
+individual `lane-plans/`, and `campaign-summary.json`. Reusing the directory
+with changed scientific inputs fails; display metadata may be retained without
+changing the scientific hash. Preparation is the default and emits no
+observable. The gas-only, solution-only, combined, and deliberately unsupported
+examples under `examples/stability-campaign/` demonstrate ready, missing-input,
+and declared-only states.
+
+Live campaign execution supports admitted homogeneous-gas `t95` lanes and two
+restricted neutral implicit-solution `t95` lanes. Gas uses the existing bounded
+RMG → ORCA route verification → Arkane → repaired-network propagation
+machinery. Solution execution propagates a condition-matched verified
+first-order network, runs the existing observable-conditioned solution
+verification session, or propagates a separately evidenced first/second-order
+ideal-solution mass-action network. Execution requires two independent controls:
+`execution_policy` must be `explicit_execute` in the immutable request and the
+command must include `--execute`.
+
+This synthetic verified-input solution smoke test runs without RMG or ORCA:
+
+```bash
+storca stability-campaign \
+  --request examples/stability-campaign/solution-verified-executable.json \
+  --campaign-dir runs/solution-campaign \
+  --execute
+```
+
+Its rate and coverage evidence are deliberately synthetic software-regression
+fixtures, not a claim about experimental cyclobutane stability. The nonlinear
+mass-action smoke test is:
+
+```bash
+storca stability-campaign \
+  --request examples/stability-campaign/solution-mass-action-executable.json \
+  --campaign-dir runs/solution-mass-action-campaign \
+  --execute
+```
+
+This second synthetic smoke test exercises dimensional bimolecular rates,
+diffusion ceilings, nonlinear propagation, and a declared reactive partner. It
+does not infer solution rates or establish experimental mechanism coverage.
+A live gas example is:
+
+```bash
+storca stability-campaign \
+  --request examples/stability-campaign/gas-executable.json \
+  --campaign-dir runs/gas-campaign \
+  --execute --cores 4 --rmg-env rmg_env
+```
+
+The gas command is real chemistry work and can be expensive. The mixed
+`gas-and-solution-executable.json` example is also live and will launch that gas
+work; it is intended for an installed RMG/ORCA/Arkane setup or an injected test
+runner, not a cheap smoke test. Only explicitly enforceable per-lane and global
+ceilings are accepted. Exact-contract reruns reuse completed gas stages and
+completed solution lane results; screening `t95` values cannot terminate the
+gas ladder. Other environment lanes remain retained as blocked or
+adapter-not-implemented results, and their physics is never replaced with a gas
+or implicit-solution calculation. Campaign reports do not combine incomparable
+lane values into a universal lifetime.
+
 With RMG configured, screen a SMILES string under stated reactor conditions:
 
 ```bash
@@ -542,17 +627,127 @@ controlled comparison, override that cap with
 `--rmg-maximum-heavy-atoms NUMBER`; the selected value and its source are
 retained in the report.
 
+### Optional independent graph/xTB discovery
+
+The default discovery execution remains RMG-only unless xTB is requested, but
+it no longer bypasses mechanism-coverage accounting: a completed RMG model is
+retained as useful evidence while the final lifetime or no-loss claim is
+withheld as `verification_incomplete` because independent discovery is absent.
+Add
+`--graph-xtb-discovery` to run a second, deliberately bounded discovery lane
+alongside the retained RMG model:
+
+```bash
+storca stability --smiles CC --scenario dry-inert-gas-screen --graph-xtb-discovery
+```
+
+This lane edits the target molecular graph (single-bond breaking, formation,
+one-break/one-form rearrangement, and mapped hydrogen transfer). When the gas
+condition declares reactive partners with charge and multiplicity, it also
+performs bounded pairwise radical association and H-atom abstraction. It rejects
+invalid, spin-incompatible, or duplicate products, then uses GFN2-xTB optimised **endpoint
+electronic energies** only to screen grossly endergonic proposals. Its retained
+artifact records the edit, atom maps, structural pruning decision, calculation
+contract, energies, hashes, xTB failures, and any search truncation. It does
+not predict a barrier, a rate, or kinetic relevance.
+
+RMG and graph/xTB candidates are merged by net molecular-graph stoichiometry
+while preserving both discovery assertions. Agreement is independent supporting
+evidence; disagreement is an explicit mechanism-coverage question. A
+graph-only survivor is ranked only by its retained xTB reaction-energy screen,
+is marked `kinetic_relevance: unknown`, and is sent through the same ORCA
+endpoint/NEB-TS/frequency/IRC, Arkane, and full-RMG-repropagation gates. It
+cannot create a `t95` by itself. If its path or rate cannot be resolved, the
+result remains `verification_incomplete` rather than reverting to an RMG-only
+no-loss conclusion.
+
+When graph/xTB is requested, RMG production, graph execution or validated
+reuse, source-preserving merge, and the supplemental verification queue are
+bound by one immutable discovery-assembly contract. The retained assembly
+separates source-agreement, RMG-only, graph-only, screened-out, malformed, and
+unresolved assertions. Exact terminal reruns reuse the assembly. A truncated or
+unavailable requested backend, a failed xTB endpoint screen, or an RMG route
+without resolvable endpoints vetoes an otherwise converged lifetime; backend
+completion still describes only the declared bounded search.
+
+Every gas stability run now writes
+`reaction-discovery/mechanism-coverage.json`. This condition- and
+observable-bound artifact records the explicitly searched reaction classes,
+candidate source agreement and disagreement, graph-only candidates, screened exclusions,
+backend failures or truncation, applicability gaps, and each candidate's
+current influence state. It also retains an uncertainty register that keeps
+mechanism coverage separate from electronic-structure, conformer, TS,
+environment, rate-theory, tunneling, pressure, electronic-state, propagation,
+and numerical uncertainty. Content-addressed revisions preserve both the
+pre-verification and post-verification decisions. A graph-only survivor remains
+`potentially_influential_unknown_rate` until the ordinary ORCA path, rate,
+repaired-network, and observable-robustness gates resolve it. Candidates left
+outside a bounded high-level verification queue therefore block an observable
+claim instead of disappearing from convergence accounting.
+
+Coverage decisions are categorical. `adequate_within_declared_scope` means
+only that the requested observable passed every retained gate within the exact
+declared searches, conditions, and methods. It is not a probability of
+mechanism completeness. Search-budget stability, when supplied, is likewise
+reported only as stability within that declared expansion. The artifact always
+retains `mechanism_completeness_claimed: false`.
+Two completed backends that both return an empty candidate set still produce
+`empty_search_shared_blind_spot_unresolved` until an applicable calibrated
+benchmark, bounded expansion, or complementary discovery source addresses the
+shared-blind-spot risk. Reactive co-species and open-shell targets likewise
+remain blocked when the independent search did not cover bimolecular or radical
+chemistry.
+
+Version 2 remains deliberately narrow and gas-workflow-compatible. Its
+bimolecular scope is pairwise radical association and H abstraction only; it
+does not supply encounter/capture rates or enumerate closed-shell substitution,
+solvent-assisted chemistry, termolecular chemistry, surfaces, photochemistry,
+arbitrary multi-bond edits, or reaction dynamics. Use
+`--graph-xtb-max-candidates` and `--graph-xtb-energy-window` to make its
+high-level queue and endpoint-energy screen explicit.
+
+An incomplete retained gas verification can be continued without redeclaring
+scientific options:
+
+```bash
+storca stability-resume-verification runs/RETAINED-STABILITY-RUN
+```
+
+Fresh stability runs retain a hashed verification execution contract. The
+continuation command accepts only the run directory, rejects changed
+conditions/methods/library content, creates a new engine session, and reuses
+the route calculation workspace. A retained v2 terminal deferral is migrated
+to the current bounded surface-resolution policy through a separate append-only,
+hashed scientific-policy amendment; the immutable execution contract is not
+rewritten, and the amendment alone permits no mechanism, rate, or lifetime
+claim. A scientifically deferred route is retried only when the explicit
+path-verifier policy changed; repeating the same policy fails closed. An
+interrupted `started` route is different: STORCA follows the
+append-only continuation chain, checks retained calculation activity, and
+refuses a duplicate while artifacts are fresh or a persisted ORCA process lease
+is live. After a quiet, dead execution it reuses the same policy attempt before
+any scientific-policy migration. For an
+interrupted NEB/NEB-TS calculation, a complete atom-order-consistent
+`*_MEP.allxyz` band is validated and supplied to ORCA through
+`Restart_ALLXYZFile` in a new, hashed restart input; the partial output is never
+overwritten. Recognized ORCA/OpenMPI startup denials likewise retain the failed
+output and launch an exact-input `-execution-retry-###` artifact under the same
+scientific-policy attempt; they are never reported as chemical scan failures.
+This is route- and NEB-level continuation, not yet a general
+restart from every Arkane or repaired-RMG interruption point.
+
 ### Condition ladder
 
 The ordered ladder runs a low-pressure RMG gas surrogate, dark dry nitrogen,
 dark dry air, dark humid air, dry-air sunlight, and humid-air sunlight. The
 first stage is a dilute target in nitrogen at `1e-6` bar: it approaches
 low-collision gas behavior but is not a vacuum calculation, and single-bond
-enumeration is not used as its kinetic model. It stops only after a stage
-supplies a condition-bound `t95` from converged repaired propagation whose
+enumeration is not used as its kinetic model. By default it stops only after a
+stage supplies a condition-bound `t95` from converged repaired propagation whose
 controlling kinetics passed ORCA/Arkane verification. An initial RMG `t95`, a
 photolysis integral, or a verified route without repaired propagation cannot
-stop the ladder. Later stages are recorded as not run, not safe:
+stop the `worst_case_search` campaign. Later stages are then recorded as not
+run, not safe:
 
 Cantera reaction-flux attribution is adaptively refined when its integrated
 target loss does not close against the propagated target inventory. A route is
@@ -562,6 +757,275 @@ closure gate.
 ```bash
 storca stability-ladder --smiles CCO --rmg-env rmg_env
 ```
+
+Use `--campaign-mode environment_map` when the deliverable is the requested
+condition map rather than the first verified loss condition. It executes every
+gas rung and retains the executed/skipped stage lists, every verified `t95`,
+and stage-specific evidence gaps in `stability-ladder.json`.
+
+```bash
+storca stability-ladder --smiles CCO --rmg-env rmg_env \
+  --campaign-mode environment_map --graph-xtb-discovery
+```
+
+With `--graph-xtb-discovery`, the ladder performs a bounded graph/xTB search
+inside each gas condition. Dry inert rungs search target-unimolecular edits;
+air and humid-air rungs additionally search the reactive partners actually
+declared in that rung. This prevents target-only evidence from being mistaken
+for independent O2/water reaction coverage. Every condition retains its own
+assembly, endpoint screens, candidates, NEB/TS/frequency/IRC evidence, Arkane
+rates, repaired libraries, and propagation. Missing partner electronic states,
+backend failure, or truncation remain explicit evidence gaps.
+
+### Stability lane contracts
+
+Every default ladder rung now carries an immutable lane definition,
+environment identity, runtime admission decision, and standardized lane-result
+summary. The lane contract identifies the discovery sources, path verifier,
+rate model, propagator, convergence policy, supported observables, required
+capabilities, applicability boundary, and support level. It wraps the existing
+condition and evidence artifacts; it does not replace or relax them.
+
+Inspect the registry with:
+
+```bash
+storca stability-lanes
+storca stability-lanes --environment-kind homogeneous_solution --json
+```
+
+The current gas and illuminated-gas lanes are `observable_supported`, still
+conditional on their existing route, rate, propagation, and convergence gates.
+Two homogeneous-solution lanes are executable, each in a deliberately narrow
+verified-input domain described below. Microsolvation, surface, and
+electrochemical entries remain `declared_only`. Moving a lane to
+`observable_supported` requires an implemented propagation chain and a
+lane-specific validation profile, not merely an installed program or keyword.
+
+### Verified-input implicit-solution lane
+
+`solution-neutral-implicit-v1` supports dark, neutral, homogeneous,
+constant-volume solution kinetics only when every retained reaction is an
+element/charge-balanced first-order elementary step with an external verified
+solution-rate claim or a STORCA-generated solvent-consistent path/rate claim.
+The evidence bundle must also carry a restricted
+reaction-network coverage claim with no unresolved candidates. The propagator
+does not convert gas rates or infer solvation corrections.
+
+STORCA can produce one such rate claim for an ordinary neutral unimolecular
+candidate with its existing endpoint/NEB-TS/TS-frequency/IRC engine.
+Preparation is the default; add `--execute` only after inspecting the retained
+request and endpoint mapping:
+
+```bash
+storca solution-path-verify \
+  --request ring-opening-smd.json \
+  --method-profile b3lyp-def2-svp
+
+storca solution-path-verify \
+  --request ring-opening-smd.json \
+  --method-profile b3lyp-def2-svp \
+  --execute --cores 4
+```
+
+The request contains the same environment and network fields shown below,
+plus one `candidate_reaction` and one executable `route`. The candidate must
+declare a positive composite `uncertainty.barrier_kcal_mol`, its source, and
+components covering `electronic_structure_barrier`, `conformer_sampling`,
+`implicit_solvent_model`, and `harmonic_tst`. Network coverage remains an
+independent claim: verifying one path cannot manufacture mechanism
+completeness.
+
+Every generated ORCA input is audited for exactly one matching `SMD(solvent)`
+or `CPCM(solvent)` keyword. A verified bundle is emitted only after endpoint
+minima, a single-imaginary-mode saddle, bidirectional IRC endpoint matching,
+condition-matched thermochemistry, and a positive activation free energy pass.
+The producer explicitly requests the environment temperature through ORCA's
+single-temperature `%freq Temp` control, including endpoint, recovery and TS
+frequency jobs. Input, output and cache temperatures must agree before rate
+generation; changing temperature requires a new request workspace. No extra
+temperature flag is needed. The producer also observes ORCA 6.1's actual
+RRHO/quasi-RRHO entropy recipe, reference/cutoff frequencies, applied frequency
+scale and thermochemistry pressure. Reactant and TS recipes must match; missing
+or contradictory evidence withholds the rate. No default is inferred from a
+method-profile name. This remains conventional TST with transmission
+coefficient one and a zero 1 M correction for the unimolecular
+reactant-to-TS step. Named CPCM/SMD parameters remain fixed: this is not a
+validated arbitrary-temperature solvent model or a new scientific support
+claim. Barrierless results are retained for future capture/VTST escalation and
+are never forced through this rate model.
+
+Quasi-RRHO entropy is not an explicit hindered-rotor or anharmonic calculation.
+The observed recipe is recorded separately from the kinetic theory; gas Arkane
+partition functions and legacy supplied-result bundles are not rewritten.
+
+The solution rate producer now automatically samples reactant conformers when
+rotatable bonds or nonaromatic rings of at least four atoms trigger the bounded
+protocol. Its first production scope is one neutral, closed-shell singlet with
+ordinary isotope treatment and at most 20 heavy atoms; known unsupported
+reactants are refused before path calculations. RDKit ETKDGv3/UFF generates
+geometric seeds, not populations or rate estimates. Up to four selected seeds
+are refined with the same solution ORCA method, temperature and shared route
+budget. Identity, complete frequency evidence, free-energy recipe and immutable
+calculation sources must agree.
+
+Distinct refined minima do **not** automatically become Boltzmann-weighted
+network rates. Without interconversion and TS-conformer evidence, the producer
+returns `conformer_rate_model_unresolved`, retains a clearly conditional
+single-path equilibrium scenario where numerically possible, and emits no
+aggregate rate/bundle. Failed, truncated or incomplete sampling also withholds
+admission. One refined cluster still requires the separately justified model/
+sampling bound; finite sampling does not prove completeness. No extra command
+flag is needed. Completed refinements can be revalidated without new jobs after
+the shared budget expires. Old session-produced TST rates cannot silently gain
+new temperature/recipe/conformer-policy credit; explicitly supplied networks
+remain labeled imports. This implementation is software-tested, not yet a
+real conformer-rate accuracy demonstration.
+
+### Verified-input solution mass-action lane
+
+`solution-neutral-implicit-mass-action-v1` accepts a distinct evidence schema
+for dark, neutral, constant-volume CPCM/SMD solution with ideal molar
+activities. It supports first-order (`s^-1`) and second-order
+(`L mol^-1 s^-1`) elementary rates, reversible pairs, and target reformation.
+Every rate needs explicit uncertainty and SHA-256-linked evidence. Every
+second-order rate also needs a sourced diffusion ceiling that bounds its upper
+rate interval. Gas and RMG rate contracts are rejected rather than converted.
+
+The nonlinear solver retains and can claim concentrations, reaction extents,
+product yields, dominant product, first t95 crossing, retention, gross
+target-consumption branching, rate-bound scenarios, and numerical closure. A
+single lane request may name several observables. A campaign must declare every
+positive-concentration starting species
+as a chemical-system component. The lane does not perform solution discovery,
+speciation, pH/activity correction, explicit solvent chemistry, or transport;
+those cases remain outside applicability.
+
+### Observable-conditioned solution verification session
+
+Several retained native, resolved RMG, graph/xTB, or user candidates can be
+allocated through one append-only session:
+
+```bash
+storca solution-verify-session \
+  --request solution-session.json \
+  --session-dir runs/solution-session
+
+storca solution-verify-session \
+  --request solution-session.json \
+  --session-dir runs/solution-session \
+  --execute --cores 4
+```
+
+The immutable request declares `environment`, `target_smiles`, `network_context`,
+`candidate_reactions`, `observable: t95`, `method_profile`, a convergence
+contract, and both ORCA-path and estimated-core-hour budgets. Reusing the exact
+session directory resumes only the identical request; a changed request is
+rejected instead of mutating prior evidence.
+
+Speculative candidates live in a `SolutionCandidateNetwork`, separately from
+the strict `VerifiedSolutionNetwork`. Gas-phase RMG rates and graph/xTB evidence
+may rank work but cannot become solution-rate evidence. For the current
+monotonic first-order lane, t95 sensitivity is analytical: only reactions that
+directly consume the target affect target disappearance. Downstream candidate
+reactions therefore receive zero t95 allocation priority.
+
+Each executed iteration retains observable bounds, the complete score
+breakdown, one selected candidate, its cache/environment contract, path result,
+and the repaired network. Screening t95 values remain allocation evidence and
+are withheld from the scientific claim. A final t95 requires verified direct
+target-loss rates, robust horizon classification, the requested interval
+tolerance, and an independent restricted network-coverage claim. Specialized
+physics, unresolved paths, coverage gaps, and exhausted budgets are terminal
+explicit states. A general concentration/product bundle is withheld when
+unverified downstream candidates remain, even if the t95-only claim has
+converged.
+
+The session uses the same explicit requested-temperature contract for neutral
+unimolecular chemistry. It does not add conformer completeness, temperature-
+dependent solvent parameters, bimolecular rate production, diffusion,
+speciation, microsolvation, photochemical, surface, or electrochemical physics.
+
+Run one bundle directly with:
+
+```bash
+storca solution-stability \
+  --evidence-bundle verified-solution-network.json
+```
+
+The bundle has this top-level form (the skeletal fragment below is deliberately
+incomplete and cannot produce a t95):
+
+```json
+{
+  "schema_version": 1,
+  "kind": "verified_implicit_solution_stability_bundle",
+  "target_smiles": "<required exact target identity>",
+  "environment": {
+    "solvent": "water",
+    "solvent_model": "SMD",
+    "temperature_K": 298.15,
+    "target_duration_seconds": 86400.0,
+    "retention_fraction": 0.95,
+    "standard_state_mol_L": 1.0,
+    "light_condition": "dark",
+    "electronic_structure_profile": "<retained profile identity>"
+  },
+  "network": {
+    "target_species_id": "target",
+    "coverage_status": "verified_complete_within_declared_unimolecular_scope",
+    "coverage_claim_id": "<evidence claim ID>",
+    "discovery_sources": ["<retained discovery or curated-mechanism source>"],
+    "unresolved_candidate_ids": [],
+    "species": [{
+      "species_id": "target",
+      "smiles": "<canonicalizable molecular identity>",
+      "initial_concentration_mol_L": 0.01,
+      "element_counts": {"C": 1, "H": 4},
+      "charge": 0
+    }],
+    "reactions": []
+  }
+}
+```
+
+Every species SMILES is canonicalized and its RDKit-derived elemental formula
+and formal charge must match the declared bookkeeping. Each reaction record
+uses one `reactant_id`, integer product stoichiometry, a
+positive `rate_constant_s`, exact solvent/model/temperature/one-molar standard
+state, a source, and a `rate_claim_id`. Every target-consuming rate also needs
+explicit lower/upper multipliers bracketing 1.0 and an `uncertainty_source`.
+A `verified_solution_tst` rate also
+requires `path_claim_id`, `standard_state_correction: one_molar_solution`, and
+calculation hashes. Experimental first-order solution rates use
+`verified_experimental_solution_rate` and `experimental_solution_rate`.
+
+The native concentration propagator evaluates an augmented linear system with
+a scaling-and-squaring matrix exponential. Species concentrations and reaction
+extents are solved together, providing t95, product concentrations, branching,
+dominant target-loss flux, elemental closure, non-negativity, and flux closure
+from one retained calculation. Combined target-rate bounds produce a retained
+t95 interval. A within-horizon t95 is withheld when the qualitative threshold
+crossing changes across those bounds; the interval is a physical allocation
+bound, not a statistical confidence interval.
+
+Attach one or more bundles to the main campaign with:
+
+```bash
+storca stability-ladder --smiles CCO --rmg-env rmg_env \
+  --campaign-mode environment_map \
+  --solution-evidence-bundle ethanol-water-solution.json
+```
+
+The bundle `target_smiles` must match the campaign target. Additional lanes are
+reported separately from gas stages because their physical models are not
+interchangeable. Under `worst_case_search`, solution bundles after the first
+verified t95 are retained as not run.
+
+The solution lane fails closed for bimolecular encounter chemistry,
+diffusion limitation, explicit solvent participation, acid/base speciation,
+ion pairing, ionic species, photochemistry, spin crossing, surfaces,
+unresolved multireference behavior, target-reforming networks, condition-rate
+mismatches, or incomplete mechanism coverage. Those findings produce no t95.
 
 The isolated parent optimization/frequency result is validated once and reused
 across later rungs when SMILES, charge, spin, and method are unchanged. Route
@@ -603,6 +1067,51 @@ generated intermediate, the reachable upstream formation route is verified
 first. One route is handled per iteration; after every repair, flux is
 recomputed instead of assuming the original ranking remains valid.
 
+An optional evidence file can make this allocation observable-conditioned:
+
+```bash
+storca stability --smiles CCO --scenario dry-air-gas-screen \
+  --rate-uncertainty-evidence rate-uncertainty.json
+```
+
+```json
+{
+  "schema_version": 1,
+  "kind": "rate_uncertainty_evidence",
+  "records": [{
+    "reaction_equation": "stability + oxygen <=> P + radical",
+    "lower_rate_multiplier": 0.1,
+    "upper_rate_multiplier": 10.0,
+    "source": "named calibration dataset or user analysis",
+    "source_kind": "method_calibration",
+    "applicability": "declared reaction class, state, environment, and temperature range",
+    "uncertainty_components": ["electronic_structure", "transition_state_search"]
+  }]
+}
+```
+
+STORCA combines an explicit multiplier bound with retained logarithmic `t95`
+sensitivity only when every selectable unresolved nonzero-flux route has both
+pieces of evidence. Incomplete coverage falls back to the established
+sensitivity/flux ordering and lists the missing route IDs. Optional verification
+costs affect ranking only when all required records share explicit units and the
+same cost model. This feature prioritizes which existing ORCA/Arkane verification
+to run next; it does not propagate a lifetime confidence interval and does not
+claim expected information gain. Upstream reachability dependencies still take
+precedence over the score.
+
+If uncertainty coverage is complete, missing local sensitivities are calculated
+automatically from independent 0.5x/2x rate perturbations of the exact retained
+Cantera reaction indices. Both runs must complete and retain a `t95`. The
+diagnostic is repeated after mechanism repair because network sensitivities can
+move; a failed diagnostic is recorded and falls back to the prior ordering.
+
+The same file may be passed to `storca stability-ladder`. Each record is matched
+again inside each condition. Set `condition_contract_id` to restrict evidence to
+one exact rung; omit it only when the stated applicability defensibly spans the
+conditions. Unmatched or condition-mismatched records remain visible evidence
+and never force a route match.
+
 The route verifier preserves the exact RMG species labels, structures,
 stoichiometry, charges, fragment multiplicities, and reaction equation. It
 resolves a common total-spin surface and a complete atom correspondence,
@@ -631,6 +1140,25 @@ from two independent orientations. That classification does not itself provide
 a rate. The default Arkane adapter currently accepts only the validated
 TS/frequency/IRC branch; a barrierless candidate remains incomplete until a
 collision-bounded capture/recrossing rate model is available.
+
+For an unresolved path, the v3 surface-resolution policy first diagnoses the
+retained band—including energy/geometry, per-image connectivity, mapped bond
+changes, and separated-fragment motion—and then spends a single route-wide
+budget on bounded stationary recovery, mapped one/two-coordinate TS seeding,
+or validated-intermediate segmentation. A resolved intermediate becomes two source-neutral native
+reaction candidates; each bound segment must independently pass TS, frequency,
+and IRC checks. Arkane then builds two elementary rates and STORCA inserts both
+with the intermediate before rerunning the full network. If identity, segment
+physics, rate theory, budget, or repaired-network insertion remains unresolved,
+the report retains the precise state and keeps `t95` null.
+
+Every active surface strategy now emits one common append-only attempt-evidence
+record linking the reaction/environment/mapping contract, exact inputs, method
+and electronic state, policy and parameters, process leases and budget usage,
+outcome/failure, and the claims it does or does not support. Implicit solution
+is accepted only with a declared CPCM/SMD solvent and the exact matching ORCA
+keyword; unsupported or mismatched environments stop before ORCA as
+`environment_model_escalation_required`.
 
 Arkane consumes separately validated reactant, product, and transition-state
 ORCA frequency artifacts and calculates condition-containing temperature and
@@ -700,6 +1228,90 @@ render a future ORCA IRC trajectory as a GIF.
 ORCA stationary-point and transition-state artifacts. It evaluates a declared
 temperature/pressure grid and bath gas; it does not infer a transition state or
 report a rate from fragment topology alone.
+
+When a verified path instead stops at `dissociation_rate_model_required` or
+`barrierless_rate_model_required`, export the condition- and path-bound request:
+
+```bash
+storca stability-export-specialist-request runs/<run>
+```
+
+After an applicable VTST, capture, master-equation, or other allowed specialist
+method has produced the schema-v1 result, raw evidence, uncertainty statement,
+and checksummed RMG library, continue without repeating ORCA:
+
+```bash
+storca stability-resume-verification runs/<run> \
+  --specialist-rate-result path/to/result.json
+```
+
+The option also accepts a directory containing results for multiple request
+hashes. STORCA matches exactly one result per request and fails closed on a
+condition mismatch, missing applicability evidence, mutated artifact, or
+mutated kinetics-library file. This imports specialist evidence; it is not a
+built-in capture/VTST solver.
+
+Provider developers can exercise the separate capture/VTST/master-equation
+conformance and numerical gate with:
+
+```bash
+storca specialist-rate-benchmark \
+  benchmarks/kinetics/specialist_rate_manifest.json \
+  path/to/provider-results
+```
+
+The bundled cases are a development set and deliberately cannot authorize a
+support claim without a locked holdout. See
+[`docs/stability/SPECIALIST_RATE_BACKENDS.md`](docs/stability/SPECIALIST_RATE_BACKENDS.md)
+for the backend decision record and required retained evidence.
+
+A source-backed one-well MESS model can be rendered without executing it:
+
+```bash
+storca stability-prepare-mess-input model.json prepared-mess/
+```
+
+The resulting manifest is explicitly `prepared_not_executed` and prohibits
+rate and lifetime claims. `storca doctor --rmg-env rmg4_env` checks the same
+RMG environment used by stability runs instead of incorrectly relying only on
+the active shell's `PATH`.
+
+If MESS is installed on `PATH`, run the prepared input with:
+
+```bash
+storca stability-run-mess-input prepared-mess/
+```
+
+This command is bounded, checkpointed, and exact-channel parsed. Its result is
+`completed_unadmitted_rate_table`, not a verified rate. If the required unit,
+uncertainty, collision-limit, and independent thermodynamic evidence has been
+assembled, finalize the exact exported specialist request with:
+
+```bash
+storca stability-finalize-mess-rate prepared-mess/ \
+  mess-admission-evidence.json specialist-rate-request.json \
+  --rmg-env rmg4_env
+```
+
+Finalization parses the reverse channel, checks detailed balance and collision
+ceilings over the complete grid, converts only an explicitly verified amount
+basis, fits a pressure-dependent RMG model, reloads the saved library, and
+checks every grid point. It emits `specialist-rate-result.json`, which can be
+passed to `stability-resume-verification`. See
+[`docs/stability/MESS_RATE_ADMISSION.md`](docs/stability/MESS_RATE_ADMISSION.md)
+for the evidence contract. This does not make a lifetime claim before the full
+network is repaired and repropagated, and the development benchmark still does
+not establish general MESS accuracy.
+
+For an ordinary verified 1↔2 transition-state route, the Arkane adapter can
+also consume a route-level `storca_explicit_gas_pressure_dependence_model`.
+That evidence must declare the applicable T/P range, sourced
+single-exponential-down parameters for the energized well, sourced
+Lennard-Jones parameters for the well and all bath gases, and immutable
+artifact hashes. Without it, Arkane's generic collisional estimates are
+retained as an unvalidated central screening model. In both cases, a nonzero-
+flux rate needs uncertainty covering `total_rate_model` or all named model
+components before the stability observable can converge.
 
 ### Decomposition explanations and animations
 

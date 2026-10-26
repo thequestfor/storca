@@ -14,6 +14,7 @@ dependencies = [
     "pillow>=10",
     "typer>=0.12",
     "rich>=13",
+    "psutil>=5.9",
 ]
 
 [project.optional-dependencies]
@@ -26,7 +27,7 @@ dev = ["pytest>=8"]
 storca = "storca.cli:app"
 
 [tool.setuptools]
-packages = ["storca", "src", "src.stability", "src.utils"]
+packages = ["storca", "storca.lanes", "src", "src.stability", "src.utils"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

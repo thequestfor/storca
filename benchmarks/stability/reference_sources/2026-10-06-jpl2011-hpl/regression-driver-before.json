@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "kind": "storca_scientific_panel_regression_before_fix",
+  "status": "two_expected_driver_failures_retained",
+  "chemistry_jobs_executed": 0,
+  "driver_before_sha256": "b0078105243e71bb22a95b1e0ca9aa50fc136dc86973ecf24cad263f6aacff1e",
+  "tests_with_reproducers_sha256": "1d7b5fc583b4e41d3891882cf47c68f3031c5ce2b2ab234fe1a7132ce82e88b2",
+  "command": "env PYTHONPATH=.:tests OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 /opt/homebrew/anaconda3/envs/orca-auto-py312/bin/python -m unittest test_scientific_panel.ScientificPanelTests.test_driver_reports_gas_hpl_rate_only_scope_not_full_case test_scientific_panel.ScientificPanelTests.test_driver_rejects_conflicting_retained_method_observable_scopes",
+  "observed_exit_code": 1,
+  "tests_run": 2,
+  "failures": [
+    {"test": "test_driver_reports_gas_hpl_rate_only_scope_not_full_case", "failure": "AssertionError: 'full_case' != 'rate_only_high_pressure_limit'", "meaning": "Actual offline report incorrectly labeled a generic-schema HPL coefficient-only comparator as a full-case comparison."},
+    {"test": "test_driver_rejects_conflicting_retained_method_observable_scopes", "failure": "AssertionError: ValueError not raised", "meaning": "Driver ignored incompatible observable scopes across method reports."}
+  ],
+  "interpretation": "Code/metadata regressions only; no model-derived prediction, quantum job or chemical validation is claimed."
+}

@@ -63,6 +63,29 @@ class RouteThermochemistryTests(unittest.TestCase):
         self.assertEqual(valid["gibbs_free_energy_hartree"], -100.02)
         self.assertFalse(invalid["valid"])
 
+    def test_low_pressure_gas_spelling_preserves_bound_and_pressure(self):
+        condition = {**self._condition(), "pressure_bar": 1e-6}
+        thermo = {"valid": True, "reaction": {"delta_g_hartree": 0.1}}
+        reference = condition_specific_forward_loss_bound(self._route(), thermo, condition)
+        condition["phase_model"] = "homogeneous gas-phase low-pressure surrogate"
+        actual = condition_specific_forward_loss_bound(self._route(), thermo, condition)
+        self.assertTrue(actual["applicable"])
+        self.assertEqual(actual["pressure_bar"], 1e-6)
+        self.assertEqual(actual["target_loss_fraction_upper_bound"],
+                         reference["target_loss_fraction_upper_bound"])
+        self.assertEqual(actual["phase_model"], condition["phase_model"])
+
+    def test_non_gas_and_unknown_models_do_not_receive_gas_bound(self):
+        thermo = {"valid": True, "reaction": {"delta_g_hartree": 0.1}}
+        for phase in (None, "implicit_solution", "bulk_liquid", "solid",
+                      "gas-liquid interface", "unknown gas-phase surrogate"):
+            with self.subTest(phase=phase):
+                result = condition_specific_forward_loss_bound(
+                    self._route(), thermo, {**self._condition(), "phase_model": phase},
+                )
+                self.assertFalse(result["applicable"])
+                self.assertEqual(result["status"], "unsupported_phase")
+
     def test_strongly_endergonic_two_to_two_route_gets_below_loss_upper_bound(self):
         route = self._route()
         with tempfile.TemporaryDirectory() as temp:
@@ -107,6 +130,47 @@ class RouteThermochemistryTests(unittest.TestCase):
             thermo = assemble_route_thermochemistry(route, stationary, self._condition())
         self.assertFalse(thermo["valid"])
         self.assertEqual(thermo["status"], "incomplete_or_condition_mismatch")
+
+    def test_endergonic_unimolecular_dissociation_gets_detailed_balance_upper_bound(self):
+        route = RouteSpec(
+            route_id="dissociation", source="test", parent_smiles="CC",
+            reactant_smiles=("CC",), product_smiles=("[CH3]", "[CH3]"),
+            reactant_labels=("stability",), product_labels=("methyl-1", "methyl-2"),
+            reactant_charges=(0,), product_charges=(0, 0),
+            multiplicity=1, reactant_multiplicities=(1,), product_multiplicities=(2, 2),
+        )
+        thermo = {
+            "valid": True,
+            "reaction": {"delta_g_hartree": 0.10},
+        }
+        bound = condition_specific_forward_loss_bound(
+            route, thermo, self._condition(),
+        )
+        self.assertTrue(bound["applicable"])
+        self.assertEqual(bound["molecularity"], {"reactants": 1, "products": 2})
+        self.assertEqual(bound["forward_rate_upper_bound_units"], "s^-1")
+        self.assertEqual(
+            bound["bound_basis"],
+            "unimolecular_dissociation_detailed_balance_from_reverse_collision_ceiling",
+        )
+        self.assertEqual(bound["status"], "forward_loss_below_retention_threshold_upper_bound")
+        self.assertLess(bound["target_loss_fraction_upper_bound"], 0.05)
+        self.assertIsNone(bound["co_reactant_label"])
+
+    def test_unimolecular_dissociation_bound_crossing_threshold_remains_unresolved(self):
+        route = RouteSpec(
+            route_id="dissociation", source="test", parent_smiles="CC",
+            reactant_smiles=("CC",), product_smiles=("[CH3]", "[CH3]"),
+            reactant_labels=("stability",), product_labels=("methyl-1", "methyl-2"),
+            reactant_charges=(0,), product_charges=(0, 0),
+            multiplicity=1, reactant_multiplicities=(1,), product_multiplicities=(2, 2),
+        )
+        bound = condition_specific_forward_loss_bound(
+            route, {"valid": True, "reaction": {"delta_g_hartree": 0.0}},
+            self._condition(),
+        )
+        self.assertEqual(bound["status"], "forward_loss_upper_bound_crosses_retention_threshold")
+        self.assertTrue(bound["retention_threshold_crossed_by_upper_bound"])
 
 
 if __name__ == "__main__":

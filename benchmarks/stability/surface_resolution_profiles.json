@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "kind": "storca_surface_resolution_benchmark_profiles",
+  "validation_level": "profile_definition_and_software_regression",
+  "scientific_validation_complete": false,
+  "policy_id": "generic-orca-path-v6-dissociation-loss-bound",
+  "metrics": [
+    "terminal_state_accuracy",
+    "elementary_path_recall",
+    "false_verified_path_count",
+    "verified_segment_rate_count",
+    "repaired_network_acceptance",
+    "observable_released_only_after_convergence",
+    "orca_calculation_count",
+    "core_hours",
+    "wall_seconds",
+    "equivalent_full_neb_retries"
+  ],
+  "profiles": [
+    {
+      "profile_id": "tert-butoxy-beta-scission-v1",
+      "system": "tert-butoxy radical -> acetone + methyl radical",
+      "purpose": "retained live regression for intermediate/path artifact recovery and coupled C-C cleavage/C-O strengthening",
+      "expected_terminal_class": [
+        "verified_repaired_network_result",
+        "barrierless_rate_model_required",
+        "electronic_state_escalation_required",
+        "intermediate_identity_unresolved",
+        "surface_resolution_budget_exhausted",
+        "surface_unresolved"
+      ],
+      "retained_run": "runs/debug-tert-butoxy-low-pressure-serial-20260826T152349Z",
+      "retained_result": "runs/debug-tert-butoxy-low-pressure-serial-20260826T152349Z/verification-engine-009/verification-summary.json",
+      "retained_path_result": "runs/debug-tert-butoxy-low-pressure-serial-20260826T152349Z/verification-engine-009/iteration-001-rmg-00574792f93c/path-result.json",
+      "retained_terminal_state": "intermediate_identity_unresolved",
+      "retained_observable": null,
+      "retained_identity_reassessment": "runs/debug-tert-butoxy-low-pressure-serial-20260826T152349Z/verification-engine/iteration-001-rmg-00574792f93c/path/endpoint-complexes/candidate-08/path/intermediates/image-02/stationary-point-recovery/attempt-01/intermediate-identity-reassessment-001.json",
+      "status": "retained_live_fail_closed_abstention",
+      "scientific_reference": "curated_reference_pending"
+    },
+    {
+      "profile_id": "ordinary-single-saddle-h-h2-exchange-v1",
+      "system": "H + H2 exchange",
+      "purpose": "ordinary single-surface saddle control",
+      "expected_terminal_class": ["verified_transition_state_path"],
+      "status": "profile_defined_live_artifacts_pending",
+      "scientific_reference": "curated_reference_pending"
+    },
+    {
+      "profile_id": "multiwell-oh-co-hoco-v1",
+      "system": "OH + CO <=> HOCO <=> H + CO2",
+      "purpose": "genuine intermediate identity, elementary segmentation, rates, and explicit network propagation",
+      "expected_terminal_class": [
+        "verified_repaired_network_result",
+        "verified_multistep_path_network_insertion_pending"
+      ],
+      "status": "profile_defined_live_artifacts_pending",
+      "scientific_reference": "curated_reference_pending"
+    },
+    {
+      "profile_id": "barrierless-methyl-recombination-v1",
+      "system": "CH3 + CH3 association/dissociation",
+      "purpose": "reproducible no-saddle classification and harmonic-TST rejection",
+      "expected_terminal_class": ["barrierless_rate_model_required"],
+      "status": "profile_defined_live_artifacts_pending",
+      "scientific_reference": "curated_reference_pending"
+    },
+    {
+      "profile_id": "shallow-mode-floppy-stationary-point-v1",
+      "system": "curated floppy stationary-point challenge set",
+      "purpose": "bidirectional mode displacement and false-minimum rejection",
+      "expected_terminal_class": [
+        "validated_intermediate",
+        "intermediate_nonminimum",
+        "intermediate_optimization_unconverged"
+      ],
+      "status": "profile_definition_requires_curated_system",
+      "scientific_reference": "curated_reference_pending"
+    }
+  ],
+  "software_regression_tests": [
+    "tests/test_surface_resolution.py",
+    "tests/test_intermediate_identity.py",
+    "tests/test_generic_reaction_path.py",
+    "tests/test_verification_adapters.py",
+    "tests/test_verification_engine.py"
+  ],
+  "limitations": "Synthetic/mocked tests establish contracts and fail-closed behavior only. Every profile remains scientifically unvalidated until condition-complete live artifacts and curated independent reference evidence are retained."
+}

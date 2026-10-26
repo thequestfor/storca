@@ -11,11 +11,32 @@
 !storca/
 !storca/**
 !tests/
-!tests/**
+# Keep the existing tracked suite and real workflow entry points. Additional
+# local regression/replay experiments are not part of the runtime commit.
+tests/**
+!tests/run_*.py
+!tests/resume_*.py
+!tests/continue_*.py
+!tests/complete_*.py
+!tests/prepare_*.py
+!tests/freeze_*.py
+!tests/report_*.py
+!tests/archive_*.py
+!tests/control_*.py
+!tests/oh_methane_statmech_inspect.py
+!tests/replay_oh_methane_angular_rates.py
+!tests/replay_oh_methane_electronic_states.py
+# Shared fixtures required by the pre-existing core regression suite.
+!tests/arkane_rotor_fixtures.py
+!tests/propagation_fixtures.py
 !pyproject.toml
 !METHODS.md
 !LIMITATIONS.md
 !ROADMAP.md
+!STABILITY_ROADMAP.md
+!docs/
+!docs/stability/
+!docs/stability/**
 !examples/
 !examples/**
 !benchmarks/
@@ -32,3 +53,12 @@
 __pycache__/
 *.py[cod]
 references/*.pdf
+
+# Local feasibility experiments and generated regression reports, not inputs
+# consumed by the runtime/benchmark evaluators. Preserve their local copies.
+benchmarks/discovery/
+benchmarks/**/test_*.py
+benchmarks/**/regression-evidence*.json
+benchmarks/**/rate-only-evidence.json
+benchmarks/**/after-*.txt
+benchmarks/**/failing-before*.txt

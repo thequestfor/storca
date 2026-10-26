@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "kind": "storca_stability_campaign_request",
+  "chemical_system": {
+    "target_component_id": "target",
+    "components": [
+      {
+        "component_id": "target",
+        "smiles": "CCO",
+        "charge": 0,
+        "multiplicity": 1,
+        "role": "target",
+        "identity_provenance": {"source": "user_input"}
+      }
+    ],
+    "material_context": {"description": "gas-ladder execution example"},
+    "user_declared_applicability_flags": {}
+  },
+  "observables": [
+    {
+      "observable_id": "target-t95",
+      "kind": "t95",
+      "target_component_id": "target",
+      "retention_fraction": 0.95,
+      "time_horizon_seconds": 86400.0
+    }
+  ],
+  "lane_requests": [
+    {
+      "lane_request_id": "dry-inert-298K",
+      "lane_id": "gas-dry-inert-v1",
+      "execution_order": 0,
+      "environment": {
+        "environment_kind": "homogeneous_gas",
+        "model_name": "storca_condition_spec_gas_v1",
+        "parameters": {
+          "scenario": "dry-inert-gas-screen",
+          "phase_model": "homogeneous gas-phase surrogate",
+          "temperature_K": 298.15,
+          "pressure_bar": 1.0,
+          "target_duration_seconds": 86400.0,
+          "retention_fraction": 0.95,
+          "light_condition": "dark"
+        }
+      },
+      "observable_ids": ["target-t95"],
+      "method_profile": "b3lyp-def2-svp",
+      "compute_budget": {
+        "rmg_attempt_timeout_seconds": 1800.0,
+        "rmg_max_processes": 1,
+        "rmg_initial_max_iterations": 100,
+        "rmg_attempts": 1,
+        "verification_max_iterations": 4,
+        "verification_path_timeout_seconds": 7200.0,
+        "verification_orientations": 2,
+        "verification_neb_images": 8
+      },
+      "discovery_policy": {
+        "rmg": "enabled",
+        "graph_xtb": "disabled",
+        "graph_xtb_max_candidates": 0,
+        "graph_xtb_energy_window_kcal_mol": 40.0
+      },
+      "evidence_inputs": [],
+      "user_assumptions": {}
+    },
+    {
+      "lane_request_id": "dry-air-298K",
+      "lane_id": "gas-dry-air-v1",
+      "execution_order": 1,
+      "environment": {
+        "environment_kind": "homogeneous_gas",
+        "model_name": "storca_condition_spec_gas_v1",
+        "parameters": {
+          "scenario": "ambient-air-gas-screen",
+          "phase_model": "homogeneous gas-phase surrogate",
+          "temperature_K": 298.15,
+          "pressure_bar": 1.0,
+          "target_duration_seconds": 86400.0,
+          "retention_fraction": 0.95,
+          "light_condition": "dark"
+        }
+      },
+      "observable_ids": ["target-t95"],
+      "method_profile": "b3lyp-def2-svp",
+      "compute_budget": {
+        "rmg_attempt_timeout_seconds": 1800.0,
+        "rmg_max_processes": 1,
+        "rmg_initial_max_iterations": 100,
+        "rmg_attempts": 1,
+        "verification_max_iterations": 4,
+        "verification_path_timeout_seconds": 7200.0,
+        "verification_orientations": 2,
+        "verification_neb_images": 8
+      },
+      "discovery_policy": {
+        "rmg": "enabled",
+        "graph_xtb": "disabled",
+        "graph_xtb_max_candidates": 0,
+        "graph_xtb_energy_window_kcal_mol": 40.0
+      },
+      "evidence_inputs": [],
+      "user_assumptions": {}
+    }
+  ],
+  "global_compute_budget": {"maximum_gas_stages": 2},
+  "campaign_policy": {
+    "mode": "worst_case_search",
+    "execution_policy": "explicit_execute",
+    "continue_after_blocked_lane": true
+  },
+  "metadata": {
+    "name": "explicit bounded gas execution example",
+    "warning": "This launches RMG, ORCA, Arkane, and propagation work when --execute is supplied."
+  }
+}

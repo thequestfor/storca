@@ -1,0 +1,501 @@
+{
+  "schema_version": 1,
+  "kind": "storca_rate_error_source_review",
+  "review_date": "2026-10-02",
+  "last_bounded_verification_date": "2026-10-03",
+  "status": "source_review_complete_calibration_pending",
+  "support_claim_allowed": false,
+  "calibration_profile_admitted": false,
+  "current_method": {
+    "electronic_structure": "B3LYP/def2-SVP",
+    "dispersion": "none_in_named_profile",
+    "project_frequency_scale_factor": 0.97,
+    "frequency_scale_status": "provisional_project_baseline",
+    "statistical_mechanics": "single_conformer_rigid_rotor_harmonic_oscillator",
+    "tunneling": "Eckart_unless_route_spec_overrides",
+    "pressure_treatment": "must_match_retained_route_high_pressure_or_explicit_falloff_model",
+    "profile_source": "storca/methods.py",
+    "rate_input_source": "storca/arkane_runner.py",
+    "adapter_source": "storca/verification_adapters.py"
+  },
+  "production_protocol_audit": {
+    "status": "source_inspected_no_predictions_generated",
+    "source_snapshot_sha256": {
+      "storca/methods.py": "24b2ba1229f69529216fb7cf6320e65f25016abcfd7a4f3cbc322ec4afe929ec",
+      "storca/arkane_runner.py": "149ffa4b413427a66ca8a78d151bd717cd5e5b05427bd2dff46c8ab963a4d820",
+      "storca/verification_adapters.py": "660507292c609b4cd3497f6197314bc857a5a386b383468a04a9cf7df08fb2bd",
+      "src/inputgen.py": "e050402b17363717c239ffecb5552f00062f81cf6470cd9594791394268eac03"
+    },
+    "source_snapshot_is_not_a_frozen_calibration_protocol": true,
+    "electronic_structure": {
+      "keywords": ["B3LYP", "def2-SVP", "NoAutoStart"],
+      "additional_NEB_OptTS_IRC_keyword": "TightSCF",
+      "frequency_job_explicit_TightSCF": false,
+      "dispersion_keyword": null,
+      "numerical_grid_override": null,
+      "functional_grid_and_SCF_defaults_require_actual_ORCA_version_and_output": true,
+      "spin_ansatz_and_orbital_stability_require_actual_output_diagnostics": true,
+      "source_TS_geometry_seed_is_not_equivalent_to_production_path_search": true
+    },
+    "statistical_mechanics": {
+      "source_spin_field": "spin_multiplicity_explicit_validated_against_ORCA",
+      "opticalIsomers": 1,
+      "externalSymmetry": "not_explicit_in_generated_species_input_inferred_by_owning_Arkane_parser",
+      "reaction_path_degeneracy": "not_explicit_owning_Arkane_input_constructs_RMG_Reaction_default_1",
+      "useHinderedRotors": false,
+      "useAtomCorrections": false,
+      "useBondCorrections": false,
+      "energy_gauge": "balanced_per_atom_electronic_shift_ZPE_not_preincluded",
+      "frequencyScaleFactor": 0.97,
+      "positive_harmonic_frequency_scale": 0.97,
+      "TS_imaginary_frequency_scale": 0.97,
+      "ZPE_scale_expression": "0.97/1.014",
+      "ZPE_scale_factor": 0.9566074950690335,
+      "scale_source": "read_owning_Arkane_statmech_source_not_an_independent_scaling_calibration"
+    },
+    "owning_software_source_audit": {
+      "rmg4_env": {
+        "RMG_version_from_source": "4.0.0",
+        "arkane/statmech.py_sha256": "21d6cd1a7b9c748fd338d7fba05f9c41990b14870459f273e38183e31e13de81",
+        "arkane/kinetics.py_sha256": "c6e4febf7fb6a24f98059ccbf7ecf82ad9e0f901914d26096afd6a11832f1e4d",
+        "arkane/ess/orca.py_sha256": "8d3bd66412efda69dbc689e3a5fa731853ec7cdbf4c68a47484a8dfa76b29661"
+      },
+      "rmg_env": {
+        "RMG_version_from_source": "3.3.0",
+        "same_ZPE_scale_expression_and_three_parameter_fit_default_observed": true
+      },
+      "automatic_transfer_between_RMG_versions_allowed": false
+    },
+    "rate_model": {
+      "tunneling": "Eckart",
+      "Eckart_parameters": "scaled_TS_imaginary_frequency_and_reactant_TS_product_conformer_E0",
+      "default_temperatures_K": [250, 273.15, 298.15, 323.15, 400, 500, 750, 1000],
+      "sampling_grid_policy": "sorted_unique_default_grid_union_requested_condition_temperature",
+      "Arrhenius_fit": "owning_Arkane_three_parameter_default_true",
+      "reported_condition_rate": "exported_fitted_kinetics_expression_reopened_and_evaluated_in_requested_RMG_environment_not_direct_raw_TST_table",
+      "reverse_direction": "generated_library_preserves_forward_direction_and_reversibility_not_an_independent_reverse_calibration_sample",
+      "one_to_one": "HPL_TST_no_bath_gas_model_pressure_not_input_to_kT",
+      "one_to_two": "mandatory_pressure_dependent_master_equation_not_matched_to_original_RDB7_HPL_table",
+      "one_to_three": "outside_current_verified_Arkane_endpoint_cardinality"
+    }
+  },
+  "rate_bound": {
+    "status": "calibration_required",
+    "lower_rate_multiplier": null,
+    "upper_rate_multiplier": null,
+    "confidence_level": null,
+    "applicable_calibration_count": 0,
+    "reason": "Inspected sources do not provide exact-method condition-matched full-rate residuals or justified bounds for all applicable physics components."
+  },
+  "local_evidence_review": [
+    {
+      "path": "benchmarks/b3lyp_def2_svp_scale_calibration_v1.json",
+      "kind": "IR_prominent_band_position_scale_fit",
+      "selected_scale_factor": 0.986,
+      "rate_calibration_admissible": false
+    },
+    {
+      "path": "benchmarks/stability/scientific_panel.json",
+      "kind": "development_panel_curation",
+      "rate_calibration_admissible": false
+    },
+    {
+      "path": "benchmarks/kinetics/specialist_rate_manifest.json",
+      "kind": "barrierless_association_evaluated_limits",
+      "rate_calibration_admissible_for_current_slice": false
+    }
+  ],
+  "sources": [
+    {
+      "source_id": "bh9-original-2022",
+      "citation": "Prasad et al., J. Chem. Theory Comput. 18, 151-166 (2022).",
+      "url": "https://doi.org/10.1021/acs.jctc.1c00694",
+      "source_kind": "primary_theory_benchmark",
+      "reaction_count": 449,
+      "forward_reverse_barrier_count": 898,
+      "pericyclic_reaction_count_before_domain_filter": 140,
+      "elements": ["H", "B", "C", "N", "O", "F", "Si", "P", "S", "Cl"],
+      "environment": "gas",
+      "reference_level": "DLPNO-CCSD(T0)/CBS_focal_point_on_source_optimized_structures",
+      "source_conformer_search": "endpoint_and_TS_sampling_then_lowest_structure_selection",
+      "B3LYP_comparison_basis": "def2-QZVPP",
+      "def2_SVP_comparison_functional": "PBE0-XDM",
+      "temperature_range_K": null,
+      "full_rate_reference": false,
+      "admissible_current_rate_profile": false,
+      "license": null,
+      "license_status": "redistribution_license_not_verified",
+      "superseded_reference_notice": "Use corrected supporting data from bh9-correction-2022."
+    },
+    {
+      "source_id": "bh9-correction-2022",
+      "citation": "Prasad et al., J. Chem. Theory Comput. 18, 4041-4044 (2022).",
+      "url": "https://doi.org/10.1021/acs.jctc.2c00362",
+      "source_kind": "primary_published_correction",
+      "institutional_article_and_correction_pdf": "https://digibuo.uniovi.es/dspace/bitstream/handle/10651/62983/bh9-postprint.pdf?sequence=1",
+      "institutional_pdf_sha256": "2b9ca0e6cd0c62f67b19d34b7c64c5f61f292d407a226cee1f228f1f2b2025ce",
+      "reference_correction": "SCF_spurious_minima_and_original_DFT_comparison_used_aVTZ_instead_of_focal_point_reference",
+      "corrected_supporting_file_content": "db_files_xyz_files_reaction_diagrams_reference_barriers_and_reaction_energies",
+      "corrected_table_II_visual_review": "combined_PDF_page_22_printed_correction_page_3",
+      "descriptive_statistics_only": {
+        "method": "B3LYP/def2-QZVPP",
+        "observable": "electronic_barrier_height",
+        "units": "kcal/mol",
+        "overall_mean_absolute_error": 4.66,
+        "overall_mean_signed_error": -0.89,
+        "pericyclic_mean_absolute_error": 7.37,
+        "pericyclic_mean_signed_error": -1.99,
+        "tail_quantile": null,
+        "maximum_error_bound": null,
+        "full_rate_uncertainty": null
+      },
+      "license": null,
+      "license_status": "redistribution_license_not_verified",
+      "corrected_raw_reference_import_status": "pending"
+    },
+    {
+      "source_id": "bhperi-updated-2015-gmtkn55",
+      "citation": "Karton and Goerigk, J. Comput. Chem. 36, 622-632 (2015); Goerigk et al., PCCP 19, 32184-32215 (2017).",
+      "url": "https://doi.org/10.1002/jcc.23837",
+      "gmtkn55_url": "https://doi.org/10.1039/C7CP04913G",
+      "author_dataset_index": "https://www.chemie.uni-bonn.de/grimme/de/software/gmtkn/gmtkn55",
+      "source_kind": "primary_theory_benchmark",
+      "barrier_count_before_domain_and_overlap_filter": 26,
+      "reference_level": "updated_W1-F12_and_W2-F12",
+      "reference_observable": "nonrelativistic_electronic_energy_ZPVE_excluded",
+      "temperature_range_K": null,
+      "full_rate_reference": false,
+      "known_overlap": "cyclobutene_ring_opening_is_in_original_BHPERI",
+      "required_identity_exclusions": ["cyclobutene_and_butadiene_pair_both_directions", "all_scored_panel_identities"],
+      "eligible_neutral_unimolecular_count": null,
+      "license": null,
+      "license_status": "redistribution_license_not_verified",
+      "corrected_raw_reference_import_status": "pending"
+    },
+    {
+      "source_id": "rdb7-rigid-2022",
+      "citation": "Spiekermann, Pattanaik and Green, Scientific Data 9, 417 (2022).",
+      "url": "https://doi.org/10.1038/s41597-022-01529-6",
+      "source_kind": "primary_theory_rate_benchmark",
+      "dataset_record_url": "https://zenodo.org/records/6618262",
+      "dataset_metadata_url": "https://zenodo.org/api/records/6618262",
+      "dataset_doi": "10.5281/zenodo.6618262",
+      "dataset_version": "v1.0.1",
+      "license": "CC-BY-4.0",
+      "license_status": "verified_in_official_Zenodo_metadata_license_id_cc_by_4_0",
+      "full_dataset_reaction_count": 11926,
+      "rigid_rate_reaction_count_before_domain_and_overlap_filter": 105,
+      "local_raw_csv_row_count_verified": 105,
+      "elements": ["H", "C", "N", "O"],
+      "maximum_heavy_atom_count": 7,
+      "environment": "gas",
+      "molecularity": "one_reactant_at_most_three_products",
+      "spin_caveat": "source_singlet_surface_can_include_products_whose_ground_state_is_not_singlet",
+      "reference_level": "RCCSD(T)-F12a/cc-pVDZ-F12//omegaB97X-D3/def2-TZVP",
+      "source_frequency_scale_factor": 0.984,
+      "source_scale_explicit_scope": "ZPE_full_thermal_application_requires_retained_input_review",
+      "rate_theory": "canonical_RRHO_TST",
+      "tunneling": "Eckart",
+      "pressure_treatment": "high_pressure_limit",
+      "rate_direction": "forward",
+      "temperature_range_K": [300, 2000],
+      "temperature_count_per_reaction": 50,
+      "temperature_spacing": "linear_in_reciprocal_temperature",
+      "temperature_column_mapping_verified": {"k(T0)": 2000.0, "k(T49)": 300.0},
+      "source_rigidity_filter": [
+        "no_endpoint_Lipinski_rotatable_bonds",
+        "rings_only_aromatic_or_three_membered",
+        "no_positive_TS_frequency_below_100_cm_inverse",
+        "visual_endpoint_and_TS_conformer_review"
+      ],
+      "published_arrhenius_fit_maximum_average_absolute_percentage_error": 233,
+      "arrhenius_fit_error_is_physical_uncertainty": false,
+      "reference_orbital_audit_source": "rdb7-revisit-2025",
+      "admissible_current_rate_profile": false,
+      "method_matched_prediction_count": 0,
+      "official_files": [
+        {
+          "key": "ccsdtf12_dz_rigid.csv",
+          "url": "https://zenodo.org/api/records/6618262/files/ccsdtf12_dz_rigid.csv/content",
+          "size_bytes": 59626,
+          "official_checksum": "md5:34e15fb76cf16a48183da55d451c7403",
+          "review_download_sha256": "7934d83ff7b9217142ee6b53499de281c416929b0916c75ccf625c5a804b9b99",
+          "review_status": "header_row_count_and_hash_verified_not_domain_admitted_or_redistributed"
+        },
+        {
+          "key": "arkane_temperatures.csv",
+          "url": "https://zenodo.org/api/records/6618262/files/arkane_temperatures.csv/content",
+          "size_bytes": 587,
+          "official_checksum": "md5:56753d9e0e4f1c4fca908da91cf590fa",
+          "review_download_sha256": "11517f9165e0ef31d1544f01d1c4f5e29e6dff11399ffec7bde95bbdfe6e4f4a",
+          "review_status": "all_50_temperature_labels_verified_against_all_105_retained_forward_rate_tables"
+        },
+        {
+          "key": "ccsdtf12_dz_rigid.tar.gz",
+          "url": "https://zenodo.org/api/records/6618262/files/ccsdtf12_dz_rigid.tar.gz/content",
+          "size_bytes": 6999631,
+          "official_checksum": "md5:c9578110caa2c07e6c8db2ee70fdb34e",
+          "review_download_sha256": "35c088276a27f70ac914f4c66dab7b5020982f4c390987432ca79d5e5c2cbfb8",
+          "purpose": "retained_Arkane_outputs_and_rate_conventions",
+          "review_status": "official_checksum_verified_all_105_forward_rate_tables_audited_species_TS_inputs_and_cached_states_read_global_job_input_absent"
+        },
+        {
+          "key": "wb97xd3.tar.gz",
+          "url": "https://zenodo.org/api/records/6618262/files/wb97xd3.tar.gz/content",
+          "size_bytes": 1423569228,
+          "official_checksum": "md5:b78f28c641a60264e3bc35bc8831c68c",
+          "purpose": "source_endpoint_TS_geometries_frequencies_and_Q_Chem_logs",
+          "review_status": "not_downloaded_require_selective_source_access_before_any_large_transfer"
+        }
+      ],
+      "later_deposit_url": "https://zenodo.org/records/13328872",
+      "later_deposit_version": "v1.1.0",
+      "later_deposit_is_2025_orbital_reference_correction": false
+    },
+    {
+      "source_id": "rdb7-authors-code-2022",
+      "url": "https://doi.org/10.5281/zenodo.5652085",
+      "dataset_version": "v1.0.0",
+      "source_kind": "primary_authors_published_rate_generation_code",
+      "file_url": "https://zenodo.org/api/records/5652085/files/reactants_products_ts_refined-1.0.0.tar.gz/content",
+      "size_bytes": 4584659,
+      "official_checksum": "md5:3063db4589a1038f99af8f4b7f6340e8",
+      "review_download_sha256": "3b104924953bd7d741bf43ff3ccdaa1163d2e1ca85b95963edaa821f50c24c40",
+      "member": "reactants_products_ts_refined-1.0.0/scripts/run_arkane.py",
+      "member_sha256": "cb694ad72c480911d956b3f4f65554b4e2c0728d5de5ae02caffc7d8b2a0e857",
+      "review_status": "read_not_executed_published_archive_checksum_verified",
+      "license": "MIT_in_archive_LICENSE_txt_Zenodo_record_declares_CC_BY_4_0",
+      "observed_recipe": {
+        "pressure_treatment": "compute_high_p_rate_coefficient",
+        "bac_type": null,
+        "three_params": false,
+        "T_min_K": 300,
+        "T_max_K": 2000,
+        "T_count": 50,
+        "frequency_scale": "assign_frequency_scale_factor(LevelOfTheory(method,basis,software))",
+        "frequency_scale_numeric_value": null,
+        "dependency_note": "requests_update_qchem_parser_RMG_branch_and_ARC_without_exact_dependency_commits"
+      },
+      "full_historical_scale_application_resolved": false,
+      "admissible_current_rate_profile": false
+    },
+    {
+      "source_id": "rdb7-revisit-2025",
+      "citation": "Liu et al., Physical Chemistry Chemical Physics 27, 13326-13339 (2025).",
+      "url": "https://doi.org/10.1039/D5CP01181G",
+      "source_kind": "primary_orbital_stability_and_reference_audit",
+      "official_article_url": "https://pubs.rsc.org/en/content/articlehtml/2025/cp/d5cp01181g",
+      "official_supporting_pdf_url": "https://www.rsc.org/suppdata/d5/cp/d5cp01181g/d5cp01181g2.pdf",
+      "official_supporting_zip_url": "https://www.rsc.org/suppdata/d5/cp/d5cp01181g/d5cp01181g1.zip",
+      "review_status": "primary_indexed_article_text_abstract_and_full_supporting_workflow_read",
+      "supporting_zip_status": "official_link_returned_404_in_web_review_2026_10_02_direct_official_reads_403_Cloudflare_challenge_not_bypassed",
+      "raw_reference_table_name": "RDB7_refined.xlsx",
+      "raw_reference_table_import_status": "pending",
+      "rigid_rate_row_join_status": "pending",
+      "classification_unit": "observable_specific_forward_barrier_reverse_barrier_and_reaction_energy_not_one_whole_reaction_label",
+      "required_for_RRHO_Eckart_forward_rate_pilot": "Audit_reactant_TS_and_all_products_reference_states_reverse_barrier_and_reaction_energy_as_well_as_forward_barrier_before_admitting_full_rate_reference",
+      "safe_alternative_source_checks": [
+        {
+          "url": "https://pubs.rsc.org/zh-hans/content/articlelanding/2025/cp/d5cp01181g",
+          "result": "publisher_landing_page_lists_same_ZIP_and_author_version_no_alternative_table_link"
+        },
+        {
+          "url": "https://pubs.rsc.org/en/content/getauthorversionpdf/D5CP01181G",
+          "result": "official_author_version_endpoint_403_not_bypassed"
+        },
+        {
+          "url": "https://mhggroupberkeley.com/members/xiao-liu/",
+          "result": "author_primary_group_page_links_published_article_only_no_refined_raw_data_link_found"
+        },
+        {
+          "url": "https://greengroup.mit.edu/biblio/revisiting-a-large-and-diverse-data-set-for-barrier-heights-and-reaction-energies-best-practices-in-density-functional-theory-calculations-for-chemical-kinetics/",
+          "result": "author_primary_group_bibliography_links_DOI_only"
+        },
+        {
+          "url": "https://zenodo.org/api/records?q=%2210.1039%2FD5CP01181G%22&size=10",
+          "result": "official_bounded_DOI_search_zero_hits_not_proof_no_deposit_exists"
+        },
+        {
+          "url": "https://zenodo.org/api/records/13328872",
+          "result": "official_v1_1_0_metadata_only_adds_individual_heats_of_formation_2024_not_2025_refinement_table"
+        }
+      ],
+      "orbital_classes": ["RHF_stable_weak_correlation", "RHF_unstable_kappa_OOMP2_stable_intermediate", "kappa_OOMP2_spin_broken_strong_correlation"],
+      "kappa_OOMP2_classification_parameter": 1.45,
+      "reference_reliability_caveat": "original_RHF_RCCSD(T)_F12_references_can_be_unreliable_for_strongly_correlated_cases",
+      "reference_refinement_scope": "selected_difficult_cases_not_all_original_rows",
+      "B3LYP_def2_SVP_rate_prediction_data": false,
+      "corrected_full_rate_tables_supplied": false,
+      "license": null,
+      "license_status": "refined_table_redistribution_license_not_verified"
+    },
+    {
+      "source_id": "jchs-rate-validation-2021",
+      "citation": "Barone et al., J. Chem. Theory Comput. 17, 4913-4928 (2021).",
+      "url": "https://doi.org/10.1021/acs.jctc.1c00406",
+      "source_kind": "primary_theory_rate_benchmark",
+      "method": "jChS_with_rev_DSD_geometries_and_statistical_mechanics",
+      "distinct_saddle_rate_theory": "RRHO_TST_with_Eckart",
+      "model_match_to_current_profile": false,
+      "available_evidence": "joint_electronic_ZPE_thermal_and_rate_comparison",
+      "admissible_current_rate_profile": false
+    },
+    {
+      "source_id": "fundamental_frequency_scaling-2024",
+      "citation": "Tikhonov, ChemPhysChem, DOI 10.1002/cphc.202400547 (2024).",
+      "url": "https://doi.org/10.1002/cphc.202400547",
+      "source_kind": "primary_frequency_benchmark",
+      "molecule_count": 441,
+      "method_match": "B3LYP_D3BJ_or_D4_not_plain_B3LYP",
+      "observable": "experimental_fundamental_vibrational_frequency",
+      "ZPE_entropy_rate_bound": null,
+      "admissible_current_rate_profile": false
+    },
+    {
+      "source_id": "split_conformal_primary",
+      "citation": "Lei et al., Distribution-Free Predictive Inference for Regression, Section 2.2.",
+      "url": "https://arxiv.org/abs/1604.04173",
+      "source_kind": "primary_statistics_method",
+      "guarantee": "finite_sample_marginal_coverage_under_exchangeable_calibration_and_test_units",
+      "not_guaranteed": "conditional_coverage_for_each_chemical_class_or_new_environment"
+    }
+  ],
+  "candidate_producer_slice": {
+    "status": "not_calibrated",
+    "observable": "electronic_barrier_error_component",
+    "chemical_domain_candidate": "neutral_closed_shell_unimolecular_pericyclic_ordinary_gas",
+    "method": "exact_B3LYP_def2_SVP_protocol_with_retained_geometry_policy",
+    "candidate_reference_sources": ["bh9-correction-2022", "bhperi-updated-2015-gmtkn55"],
+    "reference_ids": [],
+    "prediction_ids": [],
+    "residuals": [],
+    "calibration_partition_locked": false,
+    "prospective_test_partition_locked": false,
+    "temperature_range_K": null,
+    "rate_bound_allowed": false,
+    "missing_full_rate_components": [
+      "production_geometry_and_path_error",
+      "zero_point_energy",
+      "temperature_matched_enthalpy_and_entropy",
+      "conformer_population_or_explicit_interconversion",
+      "low_modes_and_hindered_rotors",
+      "symmetry_and_path_degeneracy",
+      "recrossing_and_rate_theory",
+      "Eckart_barrier_shape_and_multidimensional_tunneling_error",
+      "applicable_pressure_and_collisional_model"
+    ],
+    "required_before_admission": [
+      "source_version_license_and_hash_review",
+      "row_level_identity_charge_spin_molecularity_and_conformer_audit",
+      "non_overlap_with_evaluation_including_reverse_duplicate_and_temperature_grouping",
+      "freeze_sampling_domain_and_partitions_before_residuals",
+      "exact_method_prediction_artifacts_at_recorded_finite_compute_cost",
+      "independent_condition_matched_full_rate_evidence",
+      "prospective_accuracy_coverage_and_abstention_validation"
+    ]
+  },
+  "candidate_rate_producer_slice": {
+    "status": "source_identified_prediction_and_reference_audit_pending",
+    "observable": "theory_relative_full_rate_log_error",
+    "chemical_domain_candidate": "audited_rigid_neutral_ground_state_singlet_HCNO_unimolecular_ordinary_gas_weak_correlation",
+    "candidate_reference_sources": ["rdb7-rigid-2022", "rdb7-revisit-2025"],
+    "eligible_reference_ids": [],
+    "eligible_reaction_count": null,
+    "prediction_ids": [],
+    "method_matched_prediction_count": 0,
+    "raw_reference_inventory": "benchmarks/kinetics/rdb7_rigid_reference_inventory.json",
+    "reference_inventory_auditor": "benchmarks/kinetics/audit_rdb7_source_inventory.py",
+    "reference_inventory_status": "105_original_rate_rows_verified_all_105_orbital_reference_joins_unresolved_none_admitted",
+    "raw_undirected_graph_pair_count": 104,
+    "reverse_duplicate_source_indices": [[358, 4380]],
+    "p1_cyclobutene_butadiene_pair_overlap_count_verified_both_directions": 0,
+    "source_graph_statmech_multiplicity_inconsistency_indices": [3474],
+    "endpoint_graph_radical_electron_warning_indices": [1240, 2603, 2732, 3416, 3474, 3475, 4937],
+    "producer_branch_filter": {
+      "one_product_HPL_shape_matches_before_other_audits": 80,
+      "two_product_pressure_treatment_mismatch": 24,
+      "three_product_outside_producer_cardinality": 1,
+      "one_product_graph_radical_warning_indices": [2603, 2732, 3474, 3475, 4937],
+      "ordinary_closed_shell_graph_candidates_before_state_reference_and_method_audit": 75,
+      "graph_candidate_is_eligible_calibration_row": false,
+      "reference_TS_optical_isomers_2_count_all_rows": 69,
+      "reference_nonunit_optical_isomer_policy_row_count": 72,
+      "policy_disagreement_is_verified_physical_error": false,
+      "known_policy_disagreement_must_not_be_absorbed_as_generic_DFT_error": true
+    },
+    "P1_applicability": {
+      "exact_graph_pair_leakage_checked": true,
+      "P1_molecular_ring_class_represented_in_rigid_filter": false,
+      "reason": "RDB7_rigid_domain_permits_only_aromatic_or_three_membered_rings_P1_cyclobutene_has_nonaromatic_four_membered_ring",
+      "P1_reference_temperature_K": 423.15,
+      "exact_P1_temperature_in_raw_rate_grid": false,
+      "profile_automatically_transferable_to_P1": false,
+      "required": "independent_four_member_ring_scope_transfer_conformer_and_condition_matched_full_rate_evidence_excluding_P1_answer"
+    },
+    "source_multiplicity_caveat": "row3474_product_graph_metadata_multiplicity_3_but_retained_input_and_statmech_conformer_use_1_do_not_substitute_graph_metadata_for_computed_state",
+    "residuals": [],
+    "calibration_partition_locked": false,
+    "prospective_test_partition_locked": false,
+    "temperature_range_K": [300, 2000],
+    "temperature_domain_admitted": false,
+    "current_method": "exact_production_B3LYP_def2_SVP_RRHO_Eckart_profile_not_the_source_DFT_protocol",
+    "candidate_residual_definition": "ln(k_production(T)/k_retained_higher_level_model(T))",
+    "claim_type_if_completed": "calibrated_disagreement_with_a_declared_reference_rate_model_not_physical_accuracy",
+    "full_physical_rate_bound_allowed": false,
+    "reference_model_accuracy_bound": null,
+    "shared_reference_model_errors_not_calibrated": [
+      "RRHO_and_unmodelled_rotor_or_conformer_physics",
+      "Eckart_or_multidimensional_tunneling",
+      "recrossing_and_canonical_TST",
+      "high_pressure_limit_versus_actual_pressure",
+      "reference_electronic_structure_and_reference_geometry_error"
+    ],
+    "required_before_producer_execution": [
+      "verify_original_raw_rate_and_temperature_files_against_official_checksums_and_retain_attribution",
+      "inspect_retained_Arkane_inputs_outputs_version_units_symmetry_path_degeneracy_and_tunneling_options",
+      "join_rigid_rate_ids_to_2025_RHF_and_kappa_OOMP2_classification_and_refinement_evidence",
+      "resolve_selected_reference_changes_before_reusing_or_recomputing_any_reference_rates",
+      "audit_identity_charge_ground_state_multiplicity_molecularity_rigidity_TS_and_mechanism",
+      "exclude_cyclobutene_butadiene_both_directions_all_scored_panel_ids_and_related_duplicates",
+      "freeze_domain_partition_and_independent_reaction_scaffold_groups_before_residuals",
+      "record_exact_production_geometry_grid_SCF_convergence_orbital_stability_frequency_scale_application_and_statmech_policy",
+      "generate_bounded_exact_method_endpoint_TS_frequency_and_Arkane_rate_artifacts_at_reference_temperatures",
+      "retain_errors_crashes_abstentions_cost_and_effective_sample_count_in_batch_outcomes"
+    ],
+    "required_before_physical_accuracy_admission": [
+      "independent_condition_matched_experimental_or_justified_reference_model_full_rate_error_evidence",
+      "component_correlations_and_forward_reverse_thermodynamic_consistency",
+      "prespecified_useful_prediction_coverage_accuracy_and_cost_thresholds",
+      "locked_prospective_calibration_coverage_and_false_reassurance_validation"
+    ],
+    "paired_prediction_recipe": {
+      "status": "proposal_blocked_no_calculations_dispatched",
+      "initial_claim": "channel_conditioned_theory_relative_production_rate_disagreement_not_discovery_recall_or_experimental_accuracy",
+      "input_separation": "calculation_receives_mapped_candidate_graphs_and_declared_conditions_only_reference_rates_barriers_TS_geometries_and_scoring_products_remain_unavailable_to_P1_discovery",
+      "reference_screen": "join_2025_observable_specific_classes_for_forward_reverse_reaction_energy_audit_states_and_recompute_any_changed_rate_before_freezing_candidates",
+      "identity_exclusions": "P1_pair_both_directions_all_evaluation_identities_related_duplicates_scaffold_groups_prespecified_before_residuals",
+      "production_electronic_recipe": "generate_endpoints_from_current_route_geometry_then_current_bounded_path_TS_frequency_IRC_verifier_with_exact_B3LYP_def2_SVP_profile_retain_actual_inputs_outputs_Hessians_versions_defaults_orbital_diagnostics_and_cost",
+      "baseline_statmech": "run_current_make_arkane_rate_builder_without_reference_symmetry_optical_scale_or_energy_substitution_record_generated_input_and_inferred_symmetry_at_each_point",
+      "condition_matching": "use_prespecified_raw_reference_temperatures_between300_and1000K_each_point_uses_the_actual_adapter_default_grid_union_that_requested_temperature_no300_to298_15_substitution_or2000K_support_claim",
+      "temperature_dependence_unit": "one_curve_per_independent_reaction_or_scaffold_not_one_sample_per_temperature",
+      "primary_prediction": "current_exported_Arrhenius_condition_rate_matching_production_fit_policy_and_owning_RMG_version",
+      "secondary_fit_diagnostic": "retain_direct_TST_Eckart_rate_at_the_same_requested_temperature_and_ln_exported_over_raw_rate_without_counting_fit_error_as_physical_reference_uncertainty",
+      "residuals": "ln_exported_production_rate_over_raw_reference_rate_primary_ln_direct_production_TST_rate_over_raw_reference_rate_component",
+      "reverse_policy": "use_owning_thermochemistry_for_detailed_balance_audit_forward_and_reverse_Eckart_barriers_no_independent_reverse_fitting_or_double_counting358_4380",
+      "failure_accounting": "retain_preeligible_crashes_missing_paths_method_escalations_and_budget_abstentions_never_select_successful_low_residual_rows_posthoc",
+      "known_convention_policy": "audit_symmetry_optical_path_degeneracy_before_accuracy_admission_if_a_physical_fix_changes_the_producer_freeze_a_new_recipe_and_regenerate_predictions_do_not_tune_reference_or_absorb_known_defect_into_a_generic_error_distribution",
+      "smallest_next_blocked_prerequisite": "obtain_hash_and_join_author_authenticated_RDB7_refined_xlsx_for_retained105_indices_with_reference_changes_and_license_no_easy_class_inference_from_rates",
+      "paired_prediction_count": 0,
+      "bound_allowed": false
+    }
+  },
+  "sample_size_design_arithmetic": {
+    "status": "illustration_not_adopted_acceptance_threshold",
+    "split_conformal_rank": "ceil((n_calibration+1)*(1-alpha))",
+    "finite_absolute_score_interval_minimum_n_at_alpha_0_05": 19,
+    "zero_miss_one_sided_95_percent_upper_miss_probability": "1-0.05**(1/n_test)",
+    "independent_zero_miss_trials_for_upper_miss_probability_below_0_05": 59,
+    "independence_unit": "reaction_or_scaffold_family_as_preregistered_not_temperature_or_reverse_direction",
+    "chemical_domain_exchangeability_established": false
+  }
+}

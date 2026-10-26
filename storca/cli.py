@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import os
 import shutil
@@ -166,7 +167,12 @@ def run(
 
 
 @app.command()
-def doctor() -> None:
+def doctor(
+    rmg_env: Annotated[
+        Optional[str],
+        typer.Option(help="Conda RMG/Arkane environment, matching stability --rmg-env."),
+    ] = None,
+) -> None:
     """Report availability of external programs and optional Python packages."""
     orca = os.environ.get("STORCA_ORCA_BIN") or shutil.which("orca")
     if orca and _is_gnome_orca(Path(orca)):
@@ -181,10 +187,22 @@ def doctor() -> None:
     checks = {
         "xTB": xtb,
         "Open Babel": shutil.which("obabel"),
-        "RMG": shutil.which("rmg.py"),
+        "MESS": shutil.which("mess"),
     }
     for name, executable in checks.items():
         typer.echo(f"{'OK' if executable else 'MISSING':7} {name}{f' ({executable})' if executable else ''}")
+    if rmg_env:
+        from .rmg_compare import rmg_version
+        rmg = rmg_version(rmg_env)
+        if rmg["returncode"] == 0:
+            typer.echo(f"OK      RMG (conda env {rmg_env}; RMG-Py {rmg['version']})")
+        else:
+            typer.echo(
+                f"MISSING RMG (conda env {rmg_env}; {rmg['stderr'] or 'rmgpy import failed'})"
+            )
+    else:
+        executable = shutil.which("rmg.py")
+        typer.echo(f"{'OK' if executable else 'MISSING':7} RMG{f' ({executable})' if executable else ''}")
     for name, module in {"RDKit": "rdkit", "Open Babel Python": "openbabel"}.items():
         found = importlib.util.find_spec(module) is not None
         typer.echo(f"{'OK' if found else 'MISSING':7} {name}")
@@ -895,6 +913,106 @@ def ir_benchmark(
     typer.echo(f"Report: {output}")
 
 
+@app.command(name="specialist-rate-benchmark")
+def specialist_rate_benchmark(
+    manifest: Annotated[Path, typer.Argument(help="Specialist-rate benchmark manifest JSON.")],
+    results_dir: Annotated[Path, typer.Argument(help="Directory containing one <case-id>.json provider prediction per case.")],
+    output: Annotated[Path, typer.Option(help="Aggregate benchmark report JSON.")] = Path("specialist-rate-benchmark-report.json"),
+) -> None:
+    """Evaluate capture/VTST/master-equation evidence against a locked benchmark."""
+    from .specialist_rate_benchmark import (
+        evaluate_specialist_rate_benchmark,
+        write_specialist_rate_benchmark,
+    )
+    try:
+        report = evaluate_specialist_rate_benchmark(manifest, results_dir)
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        raise typer.BadParameter(str(error)) from error
+    write_specialist_rate_benchmark(output, report)
+    typer.echo(f"Specialist-rate benchmark status: {report['status']}")
+    typer.echo(f"Support claim allowed: {report['support_claim_allowed']}")
+    typer.echo(f"Report: {output}")
+
+
+@app.command(name="stability-prepare-mess-input")
+def stability_prepare_mess_input(
+    model: Annotated[Path, typer.Argument(help="Explicit source-backed one-well MESS model JSON.")],
+    output_dir: Annotated[Path, typer.Argument(help="Directory for deterministic MESS input artifacts.")],
+) -> None:
+    """Prepare, but do not execute, a hash-bound MESS master-equation input."""
+    from .mess_adapter import prepare_mess_input
+    try:
+        spec = json.loads(model.read_text())
+        result = prepare_mess_input(spec, output_dir)
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        raise typer.BadParameter(str(error)) from error
+    typer.echo(f"MESS preparation status: {result['status']}")
+    typer.echo(f"Input: {result['input']}")
+    typer.echo(f"Manifest: {result['manifest']}")
+
+
+@app.command(name="stability-run-mess-input")
+def stability_run_mess_input(
+    prepared_dir: Annotated[Path, typer.Argument(help="Directory produced by stability-prepare-mess-input.")],
+    mess_executable: Annotated[str, typer.Option(help="MESS executable; defaults to `mess` on PATH.")] = "mess",
+    timeout_seconds: Annotated[float, typer.Option(min=0.001, help="Hard wall-time limit for MESS.")] = 3600.0,
+) -> None:
+    """Run a prepared MESS input while retaining a still-unadmitted rate table."""
+    from .mess_adapter import run_prepared_mess_input
+    try:
+        result = run_prepared_mess_input(
+            prepared_dir, executable=mess_executable, timeout_seconds=timeout_seconds,
+        )
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        raise typer.BadParameter(str(error)) from error
+    typer.echo(f"MESS execution status: {result['status']}")
+    typer.echo(f"Checkpoint reused: {result['checkpoint_reused']}")
+    typer.echo(f"Manifest: {result['manifest']}")
+
+
+@app.command(name="stability-finalize-mess-rate")
+def stability_finalize_mess_rate(
+    prepared_dir: Annotated[Path, typer.Argument(
+        help="Completed directory produced by stability-run-mess-input.",
+    )],
+    admission_evidence: Annotated[Path, typer.Argument(
+        help="Explicit unit, uncertainty, collision, and thermodynamic evidence JSON.",
+    )],
+    specialist_request: Annotated[Path, typer.Argument(
+        help="Original exported STORCA specialist-rate request JSON.",
+    )],
+    rmg_env: Annotated[str, typer.Option(
+        help="Conda environment containing RMG-Py.",
+    )] = "rmg_env",
+) -> None:
+    """Admit a completed MESS grid and package it for network repropagation."""
+    from .mess_adapter import (
+        admit_mess_rate_table,
+        finalize_mess_specialist_rate_result,
+        write_admitted_mess_rmg_library,
+    )
+    try:
+        evidence = json.loads(admission_evidence.read_text())
+        request = json.loads(specialist_request.read_text())
+        admission = admit_mess_rate_table(prepared_dir, evidence)
+        if admission["status"] != "admitted":
+            raise ValueError(
+                "MESS rate rejected: " + ", ".join(admission["blocking_reasons"])
+            )
+        library = write_admitted_mess_rmg_library(
+            prepared_dir, rmg_env=rmg_env,
+        )
+        result = finalize_mess_specialist_rate_result(
+            prepared_dir, request,
+        )
+    except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as error:
+        raise typer.BadParameter(str(error)) from error
+    typer.echo("MESS rate status: verified for network repair")
+    typer.echo(f"Condition rate: {library['condition_rate']['value']:.12g} {library['condition_rate']['units']}")
+    typer.echo(f"Library: {library['library']}")
+    typer.echo(f"Specialist result: {result['result']}")
+
+
 @app.command(name="plausibility-benchmark")
 def plausibility_benchmark(
     manifest: Annotated[Path, typer.Argument(help="Plausibility benchmark manifest JSON.")],
@@ -1094,14 +1212,37 @@ def stability(
     verification_timeout_seconds: Annotated[float, typer.Option(min=1, help="Timeout for each individual ORCA route job; default is four hours.")] = 14400.0,
     verification_orientations: Annotated[int, typer.Option(min=2, help="Maximum endpoint orientations; two agreeing paths are required for barrierless classification.")] = 3,
     verification_neb_images: Annotated[int, typer.Option(min=5, help="Movable ORCA NEB-TS images per route orientation.")] = 8,
+    graph_xtb_discovery: Annotated[bool, typer.Option(help="Also run bounded target and declared-reactive-partner graph edits plus GFN2-xTB endpoint screening. xTB does not supply rates or barriers.")] = False,
+    graph_xtb_max_candidates: Annotated[int, typer.Option(min=0, help="Maximum graph-only xTB survivors eligible for existing high-level verification.")] = 4,
+    graph_xtb_energy_window: Annotated[float, typer.Option(help="Endergonic GFN2-xTB endpoint-energy screening ceiling in kcal/mol; not a barrier cutoff.")] = 80.0,
+    graph_xtb_executable: Annotated[Optional[str], typer.Option(help="Optional xTB executable path for graph/xTB endpoint screening.")] = None,
+    rate_uncertainty_evidence: Annotated[Optional[Path], typer.Option(help="JSON artifact with explicit per-route rate multiplier bounds and provenance for t95-conditioned verification allocation.")] = None,
 ) -> None:
     """Collect ORCA local-minimum and RMG pathway evidence under stated conditions."""
     from .stability import run_stability_screen
     from .methods import harmonic_method_profile
+    from .plausibility import electronic_state_parity
+    from .kinetic_uncertainty import load_rate_uncertainty_evidence
+
+    try:
+        profile = harmonic_method_profile(method_profile)
+        uncertainty_records = (
+            load_rate_uncertainty_evidence(rate_uncertainty_evidence)
+            if rate_uncertainty_evidence is not None else ()
+        )
+        electronic_state = electronic_state_parity(
+            smiles, charge=charge, multiplicity=multiplicity,
+        )
+        if not electronic_state["spin_parity_consistent"]:
+            raise ValueError(
+                "Declared charge/multiplicity has the wrong electron parity for the molecular formula "
+                f"({electronic_state['electron_count']} electrons, multiplicity {multiplicity})"
+            )
+    except (FileNotFoundError, KeyError, TypeError, ValueError) as error:
+        raise typer.BadParameter(str(error)) from error
 
     run_dir = create_run_directory(output_dir, name or "stability")
     try:
-        profile = harmonic_method_profile(method_profile)
         result = run_stability_screen(
             smiles,
             run_dir,
@@ -1132,6 +1273,13 @@ def stability(
             verification_timeout_seconds=verification_timeout_seconds,
             verification_orientations=verification_orientations,
             verification_neb_images=verification_neb_images,
+            graph_xtb_discovery=graph_xtb_discovery,
+            graph_xtb_budget={
+                "max_candidates_for_verification": graph_xtb_max_candidates,
+                "energy_window_kcal_mol": graph_xtb_energy_window,
+            },
+            graph_xtb_executable=graph_xtb_executable,
+            rate_uncertainty_evidence=uncertainty_records,
         )
     except Exception:
         typer.echo(f"Run directory retained for diagnosis: {run_dir}", err=True)
@@ -1140,9 +1288,74 @@ def stability(
     typer.echo(f"Assessment: {result['assessment']['status']}")
     typer.echo(f"ORCA evidence: {result['orca_evidence']['status']}")
     typer.echo(f"RMG evidence: {result['rmg_evidence']['status']}")
+    if result.get("mechanism_coverage"):
+        coverage = result["mechanism_coverage"]
+        typer.echo(f"Mechanism coverage: {coverage['status']}")
+        typer.echo(
+            "Observable coverage gate: "
+            + ("passed" if coverage.get("supports_observable_claim") else "unresolved")
+        )
     if result["risk_flags"]:
         typer.echo(f"Risk flags: {', '.join(result['risk_flags'])}")
     typer.echo(f"Result JSON: {result['result_json']}")
+
+
+@app.command(name="stability-resume-verification")
+def stability_resume_verification(
+    run_dir: Annotated[
+        Path,
+        typer.Argument(help="Retained stability run with an incomplete verification session."),
+    ],
+    cores: Annotated[
+        Optional[int],
+        typer.Option(min=1, help="Execution-only ORCA core-count amendment for this continuation."),
+    ] = None,
+    specialist_rate_result: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--specialist-rate-result",
+            help="Matching retained specialist-result JSON file, or directory of result JSON files.",
+        ),
+    ] = None,
+) -> None:
+    """Continue retained route verification under its exact scientific contract."""
+    from .verification_resume import resume_stability_verification
+
+    try:
+        result = resume_stability_verification(
+            run_dir,
+            **({"ncores": cores} if cores is not None else {}),
+            **(
+                {"specialist_rate_result": specialist_rate_result}
+                if specialist_rate_result is not None else {}
+            ),
+        )
+    except (FileNotFoundError, KeyError, TypeError, ValueError) as error:
+        raise typer.BadParameter(str(error)) from error
+    summary = result["verification_summary"]
+    typer.echo(f"Verification continuation: {summary['status']}")
+    typer.echo(f"Assessment: {result['assessment']['status']}")
+    typer.echo(f"Session: {(summary.get('artifacts') or {}).get('session_directory')}")
+    typer.echo(f"Result: {result['result_json']}")
+
+
+@app.command(name="stability-export-specialist-request")
+def stability_export_specialist_request(
+    run_dir: Annotated[
+        Path,
+        typer.Argument(help="Retained stability run with a specialist-rate deferral."),
+    ],
+) -> None:
+    """Export immutable rate requests without repeating ORCA path verification."""
+    from .verification_resume import export_specialist_rate_requests
+
+    try:
+        result = export_specialist_rate_requests(run_dir)
+    except (FileNotFoundError, KeyError, TypeError, ValueError) as error:
+        raise typer.BadParameter(str(error)) from error
+    typer.echo(f"Specialist requests exported: {len(result['requests'])}")
+    for item in result["requests"]:
+        typer.echo(f"{item['route_id']}: {item['request']}")
 
 
 @app.command(name="stability-verify")
@@ -1297,14 +1510,67 @@ def stability_ladder(
     verification_timeout_seconds: Annotated[float, typer.Option(min=1, help="Timeout for each individual ORCA route job; default is four hours.")] = 14400.0,
     verification_orientations: Annotated[int, typer.Option(min=2, help="Maximum endpoint orientations per route.")] = 3,
     verification_neb_images: Annotated[int, typer.Option(min=5, help="Movable ORCA NEB-TS images per orientation.")] = 8,
+    campaign_mode: Annotated[str, typer.Option(help="worst_case_search stops after the first verified t95; environment_map runs every requested rung.")] = "worst_case_search",
+    graph_xtb_discovery: Annotated[bool, typer.Option(help="Run bounded target and condition-specific reactive-partner graph edits plus GFN2-xTB endpoint screening for each gas rung. xTB does not supply rates or barriers.")] = False,
+    graph_xtb_max_candidates: Annotated[int, typer.Option(min=0, help="Maximum graph-only xTB survivors per condition rung eligible for existing high-level verification.")] = 4,
+    graph_xtb_energy_window: Annotated[float, typer.Option(help="Endergonic GFN2-xTB endpoint-energy screening ceiling in kcal/mol; not a barrier cutoff.")] = 80.0,
+    graph_xtb_executable: Annotated[Optional[str], typer.Option(help="Optional xTB executable path for graph/xTB endpoint screening.")] = None,
+    rate_uncertainty_evidence: Annotated[Optional[Path], typer.Option(help="JSON artifact with explicit rate multiplier bounds. Records are matched independently within every ladder condition.")] = None,
+    solution_evidence_bundle: Annotated[list[Path], typer.Option(help="Verified-input unimolecular or mass-action implicit-solution lane bundle; repeatable. The bundle target_smiles must match this campaign.")] = [],
 ) -> None:
-    """Screen an ordered low-pressure/inert/air/humidity/sunlight gas ladder."""
+    """Screen an ordered gas-condition campaign with explicit stopping semantics."""
     from .condition_ladder import run_condition_ladder
+    from .kinetic_uncertainty import load_rate_uncertainty_evidence
     from .methods import harmonic_method_profile
+    from .reaction_candidates import canonical_smiles
+    from .solution_kinetics import ImplicitSolutionEnvironment, VerifiedSolutionNetwork
+    from .solution_mass_action import MassActionSolutionEnvironment, VerifiedMassActionNetwork
     from .stability import run_stability_screen
 
+    if campaign_mode not in {"worst_case_search", "environment_map"}:
+        raise typer.BadParameter(
+            "campaign_mode must be 'worst_case_search' or 'environment_map'",
+            param_hint="--campaign-mode",
+        )
     run_dir = create_run_directory(output_dir, name or "stability-ladder")
     profile = harmonic_method_profile(method_profile)
+    uncertainty_records = (
+        load_rate_uncertainty_evidence(rate_uncertainty_evidence)
+        if rate_uncertainty_evidence is not None else ()
+    )
+    solution_payloads: list[tuple[Path, dict, str, str]] = []
+    target_identity = canonical_smiles(smiles)
+    for bundle_path in solution_evidence_bundle:
+        if not bundle_path.is_file():
+            raise typer.BadParameter(
+                f"Solution evidence bundle not found: {bundle_path}",
+                param_hint="--solution-evidence-bundle",
+            )
+        try:
+            payload = json.loads(bundle_path.read_text())
+            bundle_kind = str(payload.get("kind") or "")
+            if bundle_kind not in {
+                "verified_implicit_solution_stability_bundle",
+                "verified_implicit_solution_mass_action_stability_bundle",
+            }:
+                raise ValueError("invalid bundle kind")
+            if canonical_smiles(str(payload.get("target_smiles") or "")) != target_identity:
+                raise ValueError("target_smiles does not match the stability-ladder target")
+            if bundle_kind == "verified_implicit_solution_stability_bundle":
+                ImplicitSolutionEnvironment.from_dict(payload.get("environment") or {})
+                VerifiedSolutionNetwork.from_dict(payload.get("network") or {})
+            else:
+                MassActionSolutionEnvironment.from_dict(payload.get("environment") or {})
+                VerifiedMassActionNetwork.from_dict(payload.get("network") or {})
+        except Exception as error:
+            raise typer.BadParameter(
+                f"Invalid solution evidence bundle {bundle_path}: {type(error).__name__}: {error}",
+                param_hint="--solution-evidence-bundle",
+            ) from error
+        payload_hash = "sha256:" + hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+        ).hexdigest()
+        solution_payloads.append((bundle_path, payload, payload_hash, bundle_kind))
     shared_parent_orca: dict | None = None
 
     def dark_gas_stage(stage_smiles: str, stage_dir: Path, **stage_kwargs) -> dict:
@@ -1340,6 +1606,13 @@ def stability_ladder(
             verification_timeout_seconds=verification_timeout_seconds,
             verification_orientations=verification_orientations,
             verification_neb_images=verification_neb_images,
+            graph_xtb_budget={
+                "max_candidates_for_verification": graph_xtb_max_candidates,
+                "energy_window_kcal_mol": graph_xtb_energy_window,
+            },
+            graph_xtb_discovery=graph_xtb_discovery,
+            graph_xtb_executable=graph_xtb_executable,
+            rate_uncertainty_evidence=uncertainty_records,
         )
         if shared_parent_orca is None and stage_result.get("orca_evidence", {}).get("status") == "completed":
             shared_parent_orca = stage_result["orca_evidence"]
@@ -1358,7 +1631,68 @@ def stability_ladder(
             multiplicity=multiplicity,
             method_keywords=profile["orca_keywords"],
             light_nroots=light_nroots,
+            campaign_mode=campaign_mode,
         )
+        if solution_payloads:
+            from .condition_ladder import attach_additional_lane_runs
+            from .lanes.solution import implicit_solution_lane_definition
+            from .lanes.solution_mass_action import implicit_solution_mass_action_lane_definition
+            from .solution_mass_action_stability import run_implicit_solution_mass_action_bundle
+            from .solution_stability import run_implicit_solution_stability_bundle
+
+            additional_runs = []
+            stop_after_verified = campaign_mode == "worst_case_search" and result.get("first_t95_stage") is not None
+            for solution_index, (bundle_path, payload, payload_hash, bundle_kind) in enumerate(solution_payloads, 1):
+                mass_action = bundle_kind == "verified_implicit_solution_mass_action_stability_bundle"
+                definition = (
+                    implicit_solution_mass_action_lane_definition()
+                    if mass_action else implicit_solution_lane_definition()
+                )
+                stage_id = (
+                    f"solution-mass-action-{solution_index:03d}"
+                    if mass_action else f"solution-implicit-{solution_index:03d}"
+                )
+                if stop_after_verified:
+                    skipped = {
+                        "id": stage_id,
+                        "source_bundle": str(bundle_path),
+                        "input_bundle_sha256": payload_hash,
+                        "status": "not_run_after_first_verified_t95",
+                        "lane_result": {
+                            "schema_version": 1,
+                            "kind": "storca_stability_lane_result",
+                            "lane_id": definition.lane_id,
+                            "lane_contract_id": definition.as_dict()["contract_id"],
+                            "admission_status": "supported",
+                            "support_level": definition.support_level,
+                            "execution_status": "not_run_after_first_verified_t95",
+                            "observable_status": "not_run",
+                            "requested_observable": "t95",
+                            "observable_value": None,
+                            "observable_units": None,
+                            "reason": "The worst-case campaign had already retained its first verified t95.",
+                        },
+                    }
+                    additional_runs.append(skipped)
+                    continue
+                runner = (
+                    run_implicit_solution_mass_action_bundle
+                    if mass_action else run_implicit_solution_stability_bundle
+                )
+                lane_result = runner(payload, run_dir / "additional-environment-lanes" / stage_id)
+                entry = {
+                    "id": stage_id,
+                    "source_bundle": str(bundle_path),
+                    "input_bundle_sha256": payload_hash,
+                    **lane_result,
+                }
+                additional_runs.append(entry)
+                if (
+                    campaign_mode == "worst_case_search"
+                    and lane_result.get("estimated_time_to_retention_seconds") is not None
+                ):
+                    stop_after_verified = True
+            result = attach_additional_lane_runs(result, additional_runs)
     except Exception:
         typer.echo(f"Run directory retained for diagnosis: {run_dir}", err=True)
         raise
@@ -1367,6 +1701,200 @@ def stability_ladder(
     if result["first_t95_stage"]:
         typer.echo(f"First verified t95 stage: {result['first_t95_stage']}")
     typer.echo(f"Result JSON: {result['result_json']}")
+
+
+@app.command(name="stability-lanes")
+def stability_lanes(
+    environment_kind: Annotated[Optional[str], typer.Option(help="Only show lanes for this exact environment kind.")] = None,
+    json_output: Annotated[bool, typer.Option("--json", help="Print the complete lane registry as JSON.")] = False,
+) -> None:
+    """List stability lanes and their actual scientific support level."""
+    from .lanes import build_stability_lane_registry
+
+    registry = build_stability_lane_registry()
+    definitions = [
+        definition for definition in registry.definitions()
+        if environment_kind is None or definition.environment_kind == environment_kind
+    ]
+    if json_output:
+        payload = registry.as_dict()
+        if environment_kind is not None:
+            payload = {
+                **payload,
+                "filter": {"environment_kind": environment_kind},
+                "lane_count": len(definitions),
+                "lanes": [definition.as_dict() for definition in definitions],
+            }
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+        return
+    if not definitions:
+        typer.echo("No registered stability lanes match the requested environment kind.")
+        raise typer.Exit(code=1)
+    for definition in definitions:
+        typer.echo(
+            f"{definition.lane_id}: {definition.support_level} "
+            f"[{definition.environment_kind}]"
+        )
+
+
+@app.command(name="stability-campaign")
+def stability_campaign(
+    request: Annotated[Path, typer.Option(help="Versioned JSON stability-campaign request.")],
+    campaign_dir: Annotated[Path, typer.Option(help="Exact preparation directory; reuse only with the same immutable scientific request.")],
+    execute: Annotated[bool, typer.Option(help="Explicitly execute admitted gas and restricted implicit-solution t95 lanes; the immutable request must also authorize explicit_execute.")] = False,
+    cores: Annotated[int, typer.Option(min=1, help="Cores passed to bounded gas or solution path-verification calculations.")] = 1,
+    rmg_env: Annotated[str, typer.Option(help="Conda environment containing RMG and Arkane.")] = "rmg_env",
+    graph_xtb_executable: Annotated[Optional[str], typer.Option(help="Optional explicit xTB executable for bounded graph/xTB discovery.")] = None,
+    screen_tier: Annotated[str, typer.Option(help="RMG resource tier: quick-screen or review-screen.")] = "quick-screen",
+) -> None:
+    """Prepare a campaign, or execute admitted gas and restricted solution lanes."""
+
+    if not request.is_file():
+        raise typer.BadParameter(
+            f"Stability campaign request not found: {request}", param_hint="--request",
+        )
+    try:
+        if execute:
+            from .campaign_execution import load_and_execute_stability_campaign
+
+            result = load_and_execute_stability_campaign(
+                request,
+                campaign_dir,
+                ncores=cores,
+                rmg_env=rmg_env,
+                graph_xtb_executable=graph_xtb_executable,
+                screen_tier=screen_tier,
+            )
+        else:
+            from .campaign_planning import load_and_prepare_stability_campaign
+
+            result = load_and_prepare_stability_campaign(request, campaign_dir)
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        raise typer.BadParameter(str(error), param_hint="--request") from error
+    summary = result["summary"]
+    typer.echo(f"Stability campaign: {result['status']}")
+    typer.echo(f"Contract: {result['campaign_contract_id']}")
+    typer.echo(
+        "Ready lane requests: "
+        f"{len(summary['ready_lane_request_ids'])}/{summary['lane_request_count']}"
+    )
+    if summary["blocked_lane_request_ids"]:
+        typer.echo(
+            "Blocked lane requests: " + ", ".join(summary["blocked_lane_request_ids"])
+        )
+    if execute:
+        typer.echo(
+            "Explicit campaign execution was requested; inspect each lane result and "
+            "observable claim for its retained evidence status."
+        )
+        typer.echo(f"Execution JSON: {result['execution_json']}")
+    else:
+        typer.echo("No ORCA, xTB, RMG, Arkane, or Cantera calculation was launched.")
+    typer.echo(f"Plan JSON: {result['plan_json']}")
+    if execute and result["status"] == "failed_closed":
+        raise typer.Exit(code=1)
+
+
+@app.command(name="solution-stability")
+def solution_stability(
+    evidence_bundle: Annotated[Path, typer.Option(help="JSON bundle containing the implicit-solution contract and externally verified unimolecular network.")],
+    output_dir: Annotated[Path, typer.Option(help="Parent directory for retained solution-lane artifacts.")] = Path("runs"),
+    name: Annotated[Optional[str], typer.Option(help="Name used for the run directory.")] = None,
+    profile_points: Annotated[int, typer.Option(min=20, max=1000, help="Retained logarithmic concentration-profile points.")] = 160,
+) -> None:
+    """Propagate an admitted verified-input, first-order implicit-solution network."""
+    from .solution_stability import load_and_run_implicit_solution_stability
+
+    if not evidence_bundle.is_file():
+        raise typer.BadParameter(
+            f"Solution evidence bundle not found: {evidence_bundle}",
+            param_hint="--evidence-bundle",
+        )
+    run_dir = create_run_directory(output_dir, name or "solution-stability")
+    result = load_and_run_implicit_solution_stability(
+        evidence_bundle, run_dir, profile_points=profile_points,
+    )
+    typer.echo(f"Solution lane status: {result['status']}")
+    if result.get("estimated_time_to_retention_seconds") is not None:
+        typer.echo(f"Verified conditional t95: {result['estimated_time_to_retention_seconds']:.8g} s")
+    if result.get("reason"):
+        typer.echo(f"Reason: {result['reason']}", err=True)
+    typer.echo(f"Result JSON: {result['result_json']}")
+    if result["status"] in {"invalid_or_incomplete_evidence", "outside_method_applicability", "numerical_failure"}:
+        raise typer.Exit(code=2)
+
+
+@app.command(name="solution-path-verify")
+def solution_path_verify(
+    request: Annotated[Path, typer.Option(help="JSON candidate-path request: a restricted unimolecular stability network with sourced uncertainty, or a conditional one-/two-molecule coefficient request with physical solution conditions only.")],
+    output_dir: Annotated[Path, typer.Option(help="Parent directory for retained solvent-consistent ORCA path evidence.")] = Path("runs"),
+    name: Annotated[Optional[str], typer.Option(help="Name used for the run directory.")] = None,
+    execute: Annotated[bool, typer.Option(help="Execute endpoint, NEB-TS, TS-frequency, and IRC jobs; otherwise prepare atom-mapped endpoint structures only.")] = False,
+    cores: Annotated[int, typer.Option(min=1, help="ORCA cores for each calculation.")] = 1,
+    method_profile: Annotated[str, typer.Option(help="Named ORCA profile; must exactly match environment.electronic_structure_profile in the request.")] = "b3lyp-def2-svp",
+    timeout_seconds: Annotated[float, typer.Option(min=1, help="Timeout for each individual ORCA job.")] = 14400.0,
+    orientations: Annotated[int, typer.Option(min=1, max=12, help="Bounded independent endpoint orientations.")] = 3,
+    neb_images: Annotated[int, typer.Option(min=3, help="Movable ORCA NEB-TS images per orientation.")] = 8,
+) -> None:
+    """Prepare/verify a solution path; retain conditional coefficients or a strict bundle."""
+    from .solution_path_verification import load_and_run_implicit_solution_path_verification
+
+    if not request.is_file():
+        raise typer.BadParameter(
+            f"Solution path request not found: {request}", param_hint="--request",
+        )
+    run_dir = create_run_directory(output_dir, name or "solution-path-verification")
+    result = load_and_run_implicit_solution_path_verification(
+        request, run_dir, execute=execute, ncores=cores,
+        method_profile_name=method_profile, timeout_seconds=timeout_seconds,
+        orientations=orientations, neb_images=neb_images,
+    )
+    typer.echo(f"Solution path status: {result['status']}")
+    typer.echo(f"Result JSON: {result['result_json']}")
+    if result.get("verified_bundle"):
+        typer.echo(f"Verified solution bundle: {result['verified_bundle']}")
+    for packet in result.get("rate_coefficients") or []:
+        claim = packet["rate_claim"]
+        typer.echo(f"Conditional {claim['direction']} coefficient: {claim['rate_constant']:.6g} {claim['rate_units']}")
+        typer.echo(f"Coefficient evidence: {packet['production_json']}")
+    if result.get("reason"):
+        typer.echo(f"Reason: {result['reason']}")
+    if result["status"] not in {
+        "prepared", "verified_bundle_emitted",
+        "verified_bundle_emitted_observable_unresolved",
+        "conditional_rate_coefficients_emitted",
+    }:
+        raise typer.Exit(code=2)
+
+
+@app.command(name="solution-verify-session")
+def solution_verify_session(
+    request: Annotated[Path, typer.Option(help="Immutable JSON request containing the solution environment, candidate network, t95 convergence policy, and compute budget.")],
+    session_dir: Annotated[Path, typer.Option(help="Exact append-only session directory; reuse this directory to resume the same immutable request.")],
+    execute: Annotated[bool, typer.Option(help="Run the bounded one-reaction-at-a-time ORCA verification loop; otherwise retain only the next allocation decision.")] = False,
+    cores: Annotated[int, typer.Option(min=1, help="ORCA cores for each selected path calculation.")] = 1,
+) -> None:
+    """Prepare, execute, or resume an observable-conditioned solution session."""
+    from .solution_verification_session import load_and_run_solution_verification_session
+
+    if not request.is_file():
+        raise typer.BadParameter(
+            f"Solution verification session request not found: {request}",
+            param_hint="--request",
+        )
+    result = load_and_run_solution_verification_session(
+        request, session_dir, execute=execute, ncores=cores,
+    )
+    typer.echo(f"Solution verification session: {result['status']}")
+    typer.echo(f"Result JSON: {result['result_json']}")
+    if result.get("selected_candidate_id"):
+        typer.echo(f"Selected candidate: {result['selected_candidate_id']}")
+    if result.get("verified_bundle"):
+        typer.echo(f"Verified solution bundle: {result['verified_bundle']}")
+    if result.get("reason"):
+        typer.echo(f"Reason: {result['reason']}")
+    if result["status"] not in {"prepared", "prediction_converged"}:
+        raise typer.Exit(code=2)
 
 
 @app.command(name="rmg-compare")

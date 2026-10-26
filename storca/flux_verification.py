@@ -11,10 +11,15 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from .generated_kinetics import validate_rate_replacement_evidence
+from .kinetic_uncertainty import (
+    RateUncertaintyRecord,
+    coerce_rate_uncertainty_evidence,
+)
 from .rmg_evidence import normalize_rmg_label
+from .rmg_execution import isothermal_propagation_blockers
 
 
 DEFAULT_FLUX_COVERAGE_TARGET = 0.95
@@ -117,27 +122,47 @@ def verify_applied_replacement(
     relative_tolerance: float = 1e-4,
 ) -> dict:
     """Match a retained mechanism reaction to its verified replacement rate."""
+    from .reaction_correspondence import resolve_replacement_correspondence
+
     blockers = []
     expected_equation = replacement.get("reaction_equation") or replacement.get("replaces_reaction") or ""
-    expected_signature = reaction_signature(expected_equation, normalized=True)
-    expected_oriented = _oriented_signature(expected_equation, normalized=True)
-    inspection = repaired_rmg_evidence.get("mechanism_inspection") or {}
-    candidates = [item for item in inspection.get("reactions") or []
-                  if reaction_signature(item.get("equation", ""), normalized=True) == expected_signature]
-    if not expected_signature:
-        blockers.append("replacement_reaction_signature_missing")
-    if len(candidates) != 1:
-        blockers.append("applied_reaction_missing_or_ambiguous")
-        candidate = {}
+    identity = resolve_replacement_correspondence(repaired_rmg_evidence, replacement)
+    identity_status = identity.get("status")
+    reversed_orientation = False
+    if identity_status == "matched":
+        candidate = identity.get("candidate") or {}
+        reversed_orientation = identity.get("applied_direction") == "reverse"
+        identity_basis = "resonance_aware_structure_correspondence"
+        if not candidate or identity.get("applied_direction") not in {"forward", "reverse"}:
+            blockers.append("applied_structural_correspondence_invalid")
+    elif identity_status == "not_available":
+        # Historical artifacts predate structural correspondence. This is
+        # their original, explicitly labelled compatibility path, not a
+        # fallback after failed or ambiguous structural evidence.
+        identity_basis = "legacy_normalized_equation_labels"
+        expected_signature = reaction_signature(expected_equation, normalized=True)
+        expected_oriented = _oriented_signature(expected_equation, normalized=True)
+        inspection = repaired_rmg_evidence.get("mechanism_inspection") or {}
+        candidates = [item for item in inspection.get("reactions") or []
+                      if reaction_signature(item.get("equation", ""), normalized=True) == expected_signature]
+        if not expected_signature:
+            blockers.append("replacement_reaction_signature_missing")
+        if len(candidates) != 1:
+            blockers.append("applied_reaction_missing_or_ambiguous")
+            candidate = {}
+        else:
+            candidate = candidates[0]
+        applied_oriented = (_oriented_signature(candidate.get("equation", ""), normalized=True)
+                            if candidate else None)
+        reversed_orientation = bool(
+            candidate and expected_oriented is not None and applied_oriented == tuple(reversed(expected_oriented))
+        )
+        if candidate and applied_oriented != expected_oriented and not reversed_orientation:
+            blockers.append("applied_reaction_direction_mismatch")
     else:
-        candidate = candidates[0]
-    applied_oriented = (_oriented_signature(candidate.get("equation", ""), normalized=True)
-                        if candidate else None)
-    reversed_orientation = bool(
-        candidate and expected_oriented is not None and applied_oriented == tuple(reversed(expected_oriented))
-    )
-    if candidate and applied_oriented != expected_oriented and not reversed_orientation:
-        blockers.append("applied_reaction_direction_mismatch")
+        identity_basis = "unresolved_structural_correspondence"
+        blockers.extend(identity.get("blocking_reasons") or ["applied_structural_correspondence_failed"])
+        candidate = {}
     molecularity = int(replacement.get("molecularity") or 0)
     applied_molecularity = int(candidate.get(
         "reverse_molecularity" if reversed_orientation else "molecularity",
@@ -176,13 +201,17 @@ def verify_applied_replacement(
     return {
         "status": "passed" if not blockers else "failed",
         "route_id": replacement.get("route_id"),
+        "reaction_identity_basis": identity_basis,
+        "identity_resolution": identity,
         "matched_reaction_index": candidate.get("reaction_index") if candidate else None,
         "applied_direction": "reverse" if reversed_orientation else "forward",
         "expected_rate_si": expected_si,
         "applied_rate_si": applied_value,
         "relative_error": relative_error,
         "relative_tolerance": relative_tolerance,
-        "library_provenance_checked": bool(expected_source and provenance_available),
+        "library_provenance_checked": (
+            identity_status == "matched" or bool(expected_source and provenance_available)
+        ),
         "blocking_reasons": blockers,
     }
 
@@ -273,9 +302,24 @@ def _partial_enumeration_plan(
     verified_ids: set[str],
 ) -> dict | None:
     """Build an ORCA-only queue from a failed RMG propagation artifact."""
-    if rmg_evidence.get("enumeration_status") != "partial_enumeration":
+    historical_requested = bool(
+        rmg_evidence.get("retained_partial_routes")
+        or (rmg_evidence.get("controller") or {}).get("attempt_evidence")
+    )
+    if (rmg_evidence.get("enumeration_status") != "partial_enumeration"
+            and (rmg_evidence.get("status") == "completed" or not historical_requested)):
         return None
-    candidates = _direct_partial_enumeration_candidates(list(rmg_evidence.get("candidate_routes") or []))
+    from .rmg_partial_candidates import validated_retained_partial_routes
+    retained = validated_retained_partial_routes(rmg_evidence, condition_contract)
+    current_candidates = (
+        _direct_partial_enumeration_candidates(list(rmg_evidence.get("candidate_routes") or []))
+        if rmg_evidence.get("enumeration_status") == "partial_enumeration" else []
+    )
+    candidates = [(index, route, "candidate_routes") for index, route in current_candidates]
+    current_ids = {str(route.get("route_id")) for _, route in current_candidates}
+    candidates.extend((index, route, "retained_partial_routes")
+                      for index, route in enumerate(retained["routes"])
+                      if str(route.get("route_id")) not in current_ids)
     selectable = [
         item for item in candidates
         if str(item[1].get("route_id") or f"rmg-route-{item[0] + 1}") not in deferred_ids
@@ -287,11 +331,26 @@ def _partial_enumeration_plan(
             "kind": "flux_ranked_route_verification_plan",
             "status": "partial_enumeration_no_direct_route",
             "selected_route_id": None,
+            "partial_enumeration": True,
+            "observable_claim_allowed": False,
             "ranked_routes": [],
             "blocking_reasons": ["rmg_propagation_incomplete"],
-            "rule": "Partial RMG enumeration contained no direct, declared-reactant target-loss route eligible for ORCA.",
+            "retained_attempt_blocking_reasons": retained["blocking_reasons"],
+            "retained_attempt_findings": retained["findings"],
+            "direct_candidate_count": len(candidates),
+            "deferred_direct_route_ids": [
+                str(route.get("route_id") or f"rmg-route-{index + 1}")
+                for index, route, _ in candidates
+                if str(route.get("route_id") or f"rmg-route-{index + 1}") in deferred_ids
+            ],
+            "rule": (
+                "All retained direct RMG candidates were already verified or deferred; "
+                "RMG propagation remains incomplete."
+                if candidates else
+                "Partial RMG enumeration contained no direct, declared-reactant target-loss route eligible for ORCA."
+            ),
         }
-    selected_index, selected = selectable[0]
+    selected_index, selected, selected_source = selectable[0]
     route_id = str(selected.get("route_id") or f"rmg-route-{selected_index + 1}")
     return {
         "schema_version": 1,
@@ -300,21 +359,24 @@ def _partial_enumeration_plan(
         "ranking_basis": "direct_reachable_route_from_partial_rmg_enumeration",
         "selection_reason": "RMG propagation failed, but this direct atom-resolved route was already enumerated and must be checked by ORCA rather than discarded.",
         "partial_enumeration": True,
+        "observable_claim_allowed": False,
         "selected_route_id": route_id,
         "selected_route_index": selected_index,
-        "selected_route_source": "candidate_routes",
+        "selected_route_source": selected_source,
         "ranked_routes": [{
             "rank": rank,
             "route_index": index,
-            "route_source": "candidate_routes",
+            "route_source": source,
             "route_id": str(route.get("route_id") or f"rmg-route-{index + 1}"),
             "reaction_equation": route.get("reaction_equation") or route.get("printed_reaction_equation"),
             "initiation_status": route.get("initiation_status") or "directly_present",
             "verification_queue_class": "direct_partial_rmg_enumeration_candidate",
             "verified_replacement": False,
-        } for rank, (index, route) in enumerate(selectable, 1)],
+        } for rank, (index, route, source) in enumerate(selectable, 1)],
         "target_loss_commitment": {"status": "unavailable_partial_rmg_enumeration"},
         "blocking_reasons": [],
+        "retained_attempt_blocking_reasons": retained["blocking_reasons"],
+        "retained_attempt_findings": retained["findings"],
         "requires_repropagation_after_each_verification": True,
         "rule": "No RMG rate, flux, or t95 is used from partial enumeration; ORCA must validate every queued route.",
     }
@@ -340,7 +402,7 @@ def _numerically_negligible_closure(flux: dict) -> bool:
     return max(abs(absolute), abs(profile_loss), abs(integrated_loss)) <= floor
 
 
-def _solver_gates(rmg_evidence: dict, *, max_closure_error: float) -> list[str]:
+def _solver_gates(rmg_evidence: dict, *, condition_contract: dict, max_closure_error: float) -> list[str]:
     reasons = []
     if rmg_evidence.get("status") != "completed":
         reasons.append("rmg_model_not_completed")
@@ -350,6 +412,7 @@ def _solver_gates(rmg_evidence: dict, *, max_closure_error: float) -> list[str]:
     if not (rmg_evidence.get("time_coverage") or {}).get("complete"):
         reasons.append("requested_time_coverage_incomplete")
     propagation = rmg_evidence.get("independent_cantera_propagation") or {}
+    reasons.extend(isothermal_propagation_blockers(propagation, condition_contract))
     if propagation.get("status") != "completed":
         reasons.append("independent_propagation_missing_or_incomplete")
     if not (propagation.get("coverage") or {}).get("complete"):
@@ -409,6 +472,171 @@ def _sensitivity_by_signature(propagation: dict) -> dict[tuple, dict]:
         if signature is not None and sensitivity is not None:
             result[signature] = item
     return result
+
+
+def _apply_observable_allocation_evidence(
+    ranked: list[dict],
+    rate_uncertainties: tuple[RateUncertaintyRecord, ...],
+    condition_contract: dict,
+) -> dict:
+    """Attach auditable allocation evidence and decide whether it is complete.
+
+    The policy deliberately activates only when every selectable unresolved
+    nonzero-flux route has both retained t95 sensitivity and explicit rate
+    uncertainty.  Missing evidence therefore cannot masquerade as certainty.
+    """
+    # An ID is an opaque structured binding, not arbitrary metadata whose
+    # string representation may coincidentally match a calibration record.
+    raw_contract_id = condition_contract.get("contract_id")
+    contract_id = (
+        raw_contract_id
+        if isinstance(raw_contract_id, str) and raw_contract_id.strip()
+        else None
+    )
+    applicable = [
+        record for record in rate_uncertainties
+        if record.condition_contract_id is None or record.condition_contract_id == contract_id
+    ]
+    excluded = [
+        record for record in rate_uncertainties
+        if record.condition_contract_id is not None and record.condition_contract_id != contract_id
+    ]
+    by_id: dict[str, list[RateUncertaintyRecord]] = {}
+    for record in applicable:
+        if record.route_id is not None:
+            by_id.setdefault(record.route_id, []).append(record)
+    by_signature: dict[tuple, list[RateUncertaintyRecord]] = {}
+    for record in applicable:
+        if record.reaction_equation:
+            signature = reaction_signature(record.reaction_equation, normalized=True)
+            if signature is not None:
+                by_signature.setdefault(signature, []).append(record)
+
+    matched_record_ids: set[int] = set()
+
+    def preferred_record(candidates: list[RateUncertaintyRecord]) -> RateUncertaintyRecord | None:
+        condition_specific = [
+            record for record in candidates if record.condition_contract_id == contract_id
+        ]
+        selected = condition_specific or [
+            record for record in candidates if record.condition_contract_id is None
+        ]
+        return selected[0] if len(selected) == 1 else None
+
+    for item in ranked:
+        route_id = str(item.get("route_id") or "")
+        record = preferred_record(by_id.get(route_id, []))
+        match_basis = (
+            "condition_specific_route_id" if record is not None and record.condition_contract_id
+            else "route_id" if record is not None else None
+        )
+        if record is None:
+            signature = reaction_signature(item.get("reaction_equation") or "", normalized=True)
+            matches = by_signature.get(signature, []) if signature is not None else []
+            record = preferred_record(matches)
+            if record is not None:
+                match_basis = (
+                    "condition_specific_normalized_reaction_signature"
+                    if record.condition_contract_id
+                    else "unique_normalized_reaction_signature"
+                )
+        sensitivity = _finite(item.get("absolute_log_t95_sensitivity"))
+        uncertainty_status = "missing"
+        max_deviation = None
+        raw_proxy = None
+        if record is not None:
+            matched_record_ids.add(id(record))
+            uncertainty_status = (
+                "unbounded_downward" if record.unbounded_downward else "finite_bound"
+            )
+            max_deviation = record.max_log_rate_deviation
+            if sensitivity is not None:
+                if record.unbounded_downward and sensitivity > 0.0:
+                    raw_proxy = None
+                else:
+                    raw_proxy = sensitivity * (max_deviation or 0.0)
+        item["rate_uncertainty_evidence"] = record.as_dict() if record is not None else None
+        item["observable_priority"] = {
+            "status": (
+                "unbounded_proxy" if record is not None and raw_proxy is None and sensitivity is not None
+                else "estimated_first_order_proxy" if raw_proxy is not None
+                else "missing_sensitivity" if sensitivity is None
+                else "missing_rate_uncertainty"
+            ),
+            "match_basis": match_basis,
+            "absolute_log_t95_sensitivity": sensitivity,
+            "uncertainty_status": uncertainty_status,
+            "max_log_rate_deviation": max_deviation,
+            "raw_observable_impact_proxy": raw_proxy,
+            "estimated_cost": record.estimated_cost if record is not None else None,
+            "cost_units": record.cost_units if record is not None else None,
+            "cost_model": record.cost_model if record is not None else None,
+            "cost_normalized_priority": None,
+        }
+
+    required = [
+        item for item in ranked
+        if not item.get("verified_replacement")
+        and not item.get("deferred_unverified")
+        and (item.get("committed_target_loss_fraction") or 0.0) > 0.0
+    ]
+    missing_sensitivity = [
+        str(item["route_id"]) for item in required
+        if item["observable_priority"]["absolute_log_t95_sensitivity"] is None
+    ]
+    missing_uncertainty = [
+        str(item["route_id"]) for item in required
+        if item["rate_uncertainty_evidence"] is None
+    ]
+    active = bool(required) and not missing_sensitivity and not missing_uncertainty
+    cost_records = [item["rate_uncertainty_evidence"] for item in required]
+    costs_complete = active and all(record.get("estimated_cost") is not None for record in cost_records)
+    cost_contracts = {
+        (record.get("cost_units"), record.get("cost_model")) for record in cost_records
+        if record is not None and record.get("estimated_cost") is not None
+    }
+    cost_normalized = costs_complete and len(cost_contracts) == 1
+    if cost_normalized:
+        for item in ranked:
+            priority = item["observable_priority"]
+            raw = priority["raw_observable_impact_proxy"]
+            cost = priority["estimated_cost"]
+            if raw is not None and cost is not None:
+                priority["cost_normalized_priority"] = raw / cost
+
+    if not rate_uncertainties:
+        status = "fallback_no_explicit_uncertainty"
+    elif not active:
+        status = "fallback_incomplete_evidence"
+    else:
+        status = "observable_uncertainty_priority_active"
+    unmatched = [record.as_dict() for record in applicable if id(record) not in matched_record_ids]
+    return {
+        "schema_version": 1,
+        "kind": "observable_conditioned_verification_allocation_policy",
+        "status": status,
+        "required_route_ids": [str(item["route_id"]) for item in required],
+        "missing_t95_sensitivity_route_ids": missing_sensitivity,
+        "missing_rate_uncertainty_route_ids": missing_uncertainty,
+        "cost_normalization": {
+            "status": "active" if cost_normalized else "not_applied",
+            "reason": (
+                "all_required_routes_share_explicit_cost_units_and_cost_model"
+                if cost_normalized
+                else "cost_evidence_missing_or_not_comparable"
+            ),
+        },
+        "expected_information_gain": {
+            "status": "not_estimated",
+            "reason": "No calibrated probability-of-resolution model is available.",
+        },
+        "unmatched_applicable_records": unmatched,
+        "excluded_condition_mismatch_records": [record.as_dict() for record in excluded],
+        "interpretation": (
+            "The raw score is |d ln(t95)/d ln(k)| times the worst explicit |ln(k/k0)| bound. "
+            "It is a first-order allocation proxy, not a propagated t95 confidence interval."
+        ),
+    }
 
 
 def assess_target_loss_commitment(flux: dict, target_label: str) -> dict:
@@ -565,7 +793,8 @@ def assess_target_loss_commitment(flux: dict, target_label: str) -> dict:
     }
 
 
-def _validated_replacement_ids(replacements: Iterable[dict], condition_contract: dict) -> tuple[set[str], list[dict]]:
+def _validated_replacement_ids(replacements: Iterable[dict], condition_contract: dict,
+                               *, allow_conditional_insertion: bool = False) -> tuple[set[str], list[dict]]:
     verified = set()
     validation = []
     for replacement in replacements:
@@ -573,7 +802,26 @@ def _validated_replacement_ids(replacements: Iterable[dict], condition_contract:
             replacement,
             temperature_K=_finite(condition_contract.get("temperature_K")),
             pressure_bar=_finite(condition_contract.get("pressure_bar")),
+            condition_contract=condition_contract,
         )
+        if "forward_only_approximation_evidence" in replacement and not allow_conditional_insertion:
+            report = {**report, "status": "failed", "blocking_reasons": [
+                *report["blocking_reasons"], "conditional_model_rate_not_observable_verified",
+            ]}
+        # Planning copies are eligible only after their rate has been proven
+        # present in this exact model. A source rate may remain scientifically
+        # validated while its identity/rate handoff to a model is unresolved.
+        applied = replacement.get("planning_applied_rate_validation")
+        if applied is not None and applied.get("status") != "passed":
+            report = {
+                **report,
+                "status": "failed",
+                "blocking_reasons": [
+                    *(report.get("blocking_reasons") or []),
+                    "planning_replacement_not_rate_matched",
+                ],
+                "planning_applied_rate_validation": applied,
+            }
         validation.append(report)
         route_id = replacement.get("route_id")
         if report["status"] == "passed" and route_id:
@@ -789,6 +1037,7 @@ def build_flux_ranked_verification_plan(
     *,
     verified_replacements: Iterable[dict] = (),
     deferred_route_ids: Iterable[str] = (),
+    rate_uncertainties: Iterable[dict | RateUncertaintyRecord] = (),
     flux_coverage_target: float = DEFAULT_FLUX_COVERAGE_TARGET,
     max_closure_error: float = DEFAULT_MAX_FLUX_CLOSURE_ERROR,
 ) -> dict:
@@ -802,6 +1051,7 @@ def build_flux_ranked_verification_plan(
         raise ValueError("Flux coverage target must be in (0, 1]")
     if not 0.0 <= max_closure_error < 1.0:
         raise ValueError("Maximum flux closure error must be in [0, 1)")
+    uncertainty_records = coerce_rate_uncertainty_evidence(rate_uncertainties)
     deferred_ids = {str(route_id) for route_id in deferred_route_ids}
     verified_ids, _ = _validated_replacement_ids(verified_replacements, condition_contract)
     partial_plan = _partial_enumeration_plan(
@@ -810,7 +1060,8 @@ def build_flux_ranked_verification_plan(
     )
     if partial_plan is not None:
         return partial_plan
-    blockers = _solver_gates(rmg_evidence, max_closure_error=max_closure_error)
+    blockers = _solver_gates(rmg_evidence, condition_contract=condition_contract,
+                             max_closure_error=max_closure_error)
     if blockers:
         return {
             "schema_version": 1,
@@ -1033,12 +1284,39 @@ def build_flux_ranked_verification_plan(
             "verified_replacement": route_id in verified_ids,
             "deferred_unverified": route_id in deferred_ids,
         })
-    ranked.sort(key=lambda item: (
-        item.get("verification_queue_class") == "direct_unimolecular_rmg_candidate",
-        item["absolute_log_t95_sensitivity"] is not None,
-        item["absolute_log_t95_sensitivity"] or 0.0,
-        item["committed_target_loss_fraction"],
-    ), reverse=True)
+    allocation_policy = _apply_observable_allocation_evidence(
+        ranked, uncertainty_records, condition_contract,
+    )
+    if allocation_policy["status"] == "observable_uncertainty_priority_active":
+        cost_normalized = allocation_policy["cost_normalization"]["status"] == "active"
+
+        def observable_sort_key(item: dict) -> tuple:
+            priority = item["observable_priority"]
+            sensitivity = priority["absolute_log_t95_sensitivity"]
+            unbounded_effect = (
+                priority["uncertainty_status"] == "unbounded_downward"
+                and sensitivity is not None and sensitivity > 0.0
+            )
+            score = (
+                priority["cost_normalized_priority"]
+                if cost_normalized else priority["raw_observable_impact_proxy"]
+            )
+            return (
+                item.get("verification_queue_class") == "direct_unimolecular_rmg_candidate",
+                unbounded_effect,
+                score is not None,
+                score or 0.0,
+                item["committed_target_loss_fraction"],
+            )
+
+        ranked.sort(key=observable_sort_key, reverse=True)
+    else:
+        ranked.sort(key=lambda item: (
+            item.get("verification_queue_class") == "direct_unimolecular_rmg_candidate",
+            item["absolute_log_t95_sensitivity"] is not None,
+            item["absolute_log_t95_sensitivity"] or 0.0,
+            item["committed_target_loss_fraction"],
+        ), reverse=True)
 
     cumulative = 0.0
     verified_coverage = 0.0
@@ -1148,8 +1426,15 @@ def build_flux_ranked_verification_plan(
         "kind": "flux_ranked_route_verification_plan",
         "status": status,
         "ranking_basis": (
-            f"retained_t95_sensitivity_then_{ranking_basis}" if sensitivities else ranking_basis
+            (
+                "explicit_rate_uncertainty_x_retained_t95_sensitivity"
+                + ("_per_explicit_cost" if allocation_policy["cost_normalization"]["status"] == "active" else "")
+                + f"_then_{ranking_basis}"
+            )
+            if allocation_policy["status"] == "observable_uncertainty_priority_active"
+            else f"retained_t95_sensitivity_then_{ranking_basis}" if sensitivities else ranking_basis
         ),
+        "allocation_policy": allocation_policy,
         "intrinsic_failover_required": bool(intrinsic_failover),
         "selection_reason": (
             "invalid_screening_kinetics_requires_orca_check_of_rmg_direct_unimolecular_routes"
@@ -1218,6 +1503,7 @@ def assess_t95_robustness(
     *,
     retention_fraction: float,
     unresolved_sensitivity_envelope: dict | None = None,
+    rate_uncertainty_required_route_ids: Iterable[str] = (),
     relative_tolerance: float = DEFAULT_T95_RELATIVE_TOLERANCE,
 ) -> dict:
     """Decide whether a repaired t95 is insensitive to unresolved routes.
@@ -1241,8 +1527,18 @@ def assess_t95_robustness(
                             (_finite(item.get("gross_target_destruction_fraction")) or 0.0) > 0.0)
     if (_finite(verification_plan.get("unattributed_flux_fraction")) or 0.0) > 1e-12:
         unresolved_ids.append("__unattributed_target_loss_flux__")
+    calculated_ids = {
+        str(value) for value in rate_uncertainty_required_route_ids
+    }
+    uncertain_verified_ids = sorted(
+        str(item["route_id"]) for item in ranked
+        if item.get("verified_replacement")
+        and str(item.get("route_id")) in calculated_ids
+        and (_finite(item.get("gross_target_destruction_fraction")) or 0.0) > 0.0
+    )
+    envelope_ids = sorted(set(unresolved_ids) | set(uncertain_verified_ids))
     baseline_t95 = _finite(propagation.get("estimated_time_to_retention_seconds"))
-    if not unresolved_ids:
+    if not envelope_ids:
         return {
             "status": "robust_verified_t95" if baseline_t95 is not None else "robust_no_t95_within_horizon",
             "reason": "all_nonzero_target_loss_flux_routes_have_validated_replacements",
@@ -1252,47 +1548,67 @@ def assess_t95_robustness(
 
     envelope = unresolved_sensitivity_envelope or {}
     if envelope.get("status") != "completed" or not envelope.get("combined_perturbation"):
-        return {"status": "not_robust", "reason": "combined_unresolved_route_sensitivity_missing",
-                "t95_seconds": None, "unresolved_route_ids": unresolved_ids}
-    if sorted(str(value) for value in envelope.get("unresolved_route_ids") or []) != sorted(unresolved_ids):
+        return {"status": "not_robust", "reason": (
+                    "combined_prediction_rate_sensitivity_missing"
+                    if uncertain_verified_ids else
+                    "combined_unresolved_route_sensitivity_missing"
+                ),
+                "t95_seconds": None, "unresolved_route_ids": unresolved_ids,
+                "uncertain_verified_route_ids": uncertain_verified_ids}
+    retained_envelope_ids = envelope.get("uncertain_route_ids")
+    if retained_envelope_ids is None:
+        retained_envelope_ids = envelope.get("unresolved_route_ids") or []
+    if sorted(str(value) for value in retained_envelope_ids) != envelope_ids:
         return {"status": "not_robust", "reason": "sensitivity_envelope_route_set_mismatch",
-                "t95_seconds": None, "unresolved_route_ids": unresolved_ids}
+                "t95_seconds": None, "unresolved_route_ids": unresolved_ids,
+                "uncertain_verified_route_ids": uncertain_verified_ids}
     bounds = envelope.get("rate_bounds") or []
     bounded = {str(item.get("route_id")) for item in bounds
-               if item.get("bound_source") and _finite(item.get("lower_rate")) is not None
-               and _finite(item.get("upper_rate")) is not None}
-    if bounded != set(unresolved_ids):
+               if item.get("bound_source") and (
+                   (_finite(item.get("lower_rate")) is not None
+                    and _finite(item.get("upper_rate")) is not None)
+                   or (_finite(item.get("lower_rate_multiplier")) is not None
+                       and _finite(item.get("upper_rate_multiplier")) is not None)
+               )}
+    if bounded != set(envelope_ids):
         return {"status": "not_robust", "reason": "unresolved_rate_bounds_missing_provenance",
-                "t95_seconds": None, "unresolved_route_ids": unresolved_ids}
+                "t95_seconds": None, "unresolved_route_ids": unresolved_ids,
+                "uncertain_verified_route_ids": uncertain_verified_ids}
     lower = envelope.get("lower_bound_propagation") or {}
     upper = envelope.get("upper_bound_propagation") or {}
     if not _complete_propagation(lower) or not _complete_propagation(upper):
         return {"status": "not_robust", "reason": "sensitivity_bound_propagation_incomplete",
-                "t95_seconds": None, "unresolved_route_ids": unresolved_ids}
+                "t95_seconds": None, "unresolved_route_ids": unresolved_ids,
+                "uncertain_verified_route_ids": uncertain_verified_ids}
     bound_t95 = [_finite(lower.get("estimated_time_to_retention_seconds")),
                  _finite(upper.get("estimated_time_to_retention_seconds"))]
     if baseline_t95 is not None:
         if any(value is None for value in bound_t95):
             return {"status": "not_robust", "reason": "t95_crossing_not_preserved_across_bounds",
-                    "t95_seconds": None, "unresolved_route_ids": unresolved_ids}
+                    "t95_seconds": None, "unresolved_route_ids": unresolved_ids,
+                    "uncertain_verified_route_ids": uncertain_verified_ids}
         values = [baseline_t95, *bound_t95]
         relative_span = (max(values) - min(values)) / baseline_t95
         if relative_span > relative_tolerance:
             return {"status": "not_robust", "reason": "t95_sensitive_to_unresolved_routes",
                     "t95_seconds": None, "relative_span": relative_span,
-                    "unresolved_route_ids": unresolved_ids}
+                    "unresolved_route_ids": unresolved_ids,
+                    "uncertain_verified_route_ids": uncertain_verified_ids}
         return {"status": "robust_verified_t95", "reason": "combined_rate_bounds_preserve_t95",
                 "t95_seconds": baseline_t95, "t95_bounds_seconds": [min(values), max(values)],
                 "relative_span": relative_span, "relative_tolerance": relative_tolerance,
-                "unresolved_route_ids": unresolved_ids}
+                "unresolved_route_ids": unresolved_ids,
+                "uncertain_verified_route_ids": uncertain_verified_ids}
 
     final_fractions = [_final_fraction(item) for item in (propagation, lower, upper)]
     if all(value is not None and value >= retention_fraction for value in final_fractions):
         return {"status": "robust_no_t95_within_horizon",
                 "reason": "all_combined_rate_bounds_remain_above_retention_at_complete_horizon",
-                "t95_seconds": None, "unresolved_route_ids": unresolved_ids}
+                "t95_seconds": None, "unresolved_route_ids": unresolved_ids,
+                "uncertain_verified_route_ids": uncertain_verified_ids}
     return {"status": "not_robust", "reason": "retention_conclusion_changes_across_unresolved_rate_bounds",
-            "t95_seconds": None, "unresolved_route_ids": unresolved_ids}
+            "t95_seconds": None, "unresolved_route_ids": unresolved_ids,
+            "uncertain_verified_route_ids": uncertain_verified_ids}
 
 
 def _propagation_payload(rmg_evidence: dict, condition_contract: dict) -> dict:
@@ -1308,7 +1624,8 @@ def _propagation_payload(rmg_evidence: dict, condition_contract: dict) -> dict:
     required_conditions = ("temperature_K", "pressure_bar", "target_duration_seconds", "retention_fraction")
     absent = [name for name in required_conditions if _finite(condition_contract.get(name)) is None]
     if absent or not composition:
-        raise ValueError("Immutable condition contract is incomplete for propagation: " + ", ".join(absent))
+        detail = ", ".join(absent or ["composition"])
+        raise ValueError("Immutable condition contract is incomplete for propagation: " + detail)
     return {
         "operation": "propagate",
         "chemkin": required["chemkin"],
@@ -1319,6 +1636,219 @@ def _propagation_payload(rmg_evidence: dict, condition_contract: dict) -> dict:
         "target_label": condition_contract.get("target_label", "stability"),
         "target_duration_seconds": condition_contract["target_duration_seconds"],
         "retention_fraction": condition_contract["retention_fraction"],
+    }
+
+
+def run_collision_limit_rate_envelope(
+    rmg_evidence: dict,
+    condition_contract: dict,
+    *,
+    rmg_env: str | None,
+    timeout_seconds: float = 300.0,
+) -> dict:
+    """Bound observable influence of rates that exceed collision ceilings.
+
+    Each affected reversible Cantera reaction is scaled as one thermodynamic
+    pair.  The lower endpoint removes that reaction and the upper endpoint
+    scales its retained rate to the independently calculated collision
+    ceiling.  This does not validate the rate; it asks whether every rate in
+    that physically admissible interval leaves the requested loss observable
+    below its threshold.
+    """
+    validation = (
+        (rmg_evidence.get("kinetics_validation") or {})
+        .get("condition_mechanism_validation") or {}
+    )
+    raw_violators = validation.get("violators") or []
+    by_index: dict[int, dict] = {}
+    for item in raw_violators:
+        index = item.get("reaction_index")
+        ratio = _finite(item.get("rate_to_collision_limit_ratio"))
+        if index is None or ratio is None or ratio <= 1.0:
+            continue
+        index = int(index)
+        retained = by_index.get(index)
+        if retained is None or ratio > retained["rate_to_collision_limit_ratio"]:
+            by_index[index] = {
+                "reaction_index": index,
+                "reaction_equation": item.get("reaction_equation"),
+                "direction": item.get("direction"),
+                "rate_coefficient_si": item.get("rate_coefficient_si"),
+                "collision_limit_si": item.get("collision_limit_si"),
+                "rate_to_collision_limit_ratio": ratio,
+                "upper_multiplier": 1.0 / ratio,
+                "lower_multiplier": 0.0,
+            }
+    if not by_index:
+        return {
+            "schema_version": 1,
+            "kind": "collision_limit_rate_envelope",
+            "status": "incomplete",
+            "reason": "indexed_collision_limit_violators_missing",
+            "rate_bounds": [],
+        }
+    lower_multipliers = {str(index): 0.0 for index in by_index}
+    upper_multipliers = {
+        str(index): record["upper_multiplier"]
+        for index, record in by_index.items()
+    }
+    payload = _propagation_payload(rmg_evidence, condition_contract)
+    from .rmg_bridge_client import run_rmg_bridge
+
+    lower = run_rmg_bridge(
+        {**payload, "reaction_multipliers": lower_multipliers},
+        rmg_env=rmg_env,
+        timeout_seconds=timeout_seconds,
+    )
+    upper = run_rmg_bridge(
+        {**payload, "reaction_multipliers": upper_multipliers},
+        rmg_env=rmg_env,
+        timeout_seconds=timeout_seconds,
+    )
+
+    def loss_upper_bound(propagation: dict) -> float | None:
+        loss = _finite(propagation.get("target_loss_fraction"))
+        flux = propagation.get("reaction_flux_attribution") or {}
+        absolute = _finite(flux.get("numerical_closure_absolute_error_kmol"))
+        initial = _finite(flux.get("initial_target_amount_kmol"))
+        if (loss is None or absolute is None or initial is None or initial <= 0.0
+                or flux.get("status") != "completed"):
+            return None
+        return max(0.0, loss) + abs(absolute) / initial
+
+    lower_bound = loss_upper_bound(lower)
+    upper_bound = loss_upper_bound(upper)
+    complete = (
+        _complete_propagation(lower) and _complete_propagation(upper)
+        and lower_bound is not None and upper_bound is not None
+    )
+    maximum = max(lower_bound, upper_bound) if complete else None
+    threshold = 1.0 - float(condition_contract["retention_fraction"])
+    return {
+        "schema_version": 1,
+        "kind": "collision_limit_rate_envelope",
+        "status": "completed" if complete else "incomplete",
+        "reason": None if complete else "bounded_propagation_or_flux_closure_incomplete",
+        "rate_bounds": [by_index[index] for index in sorted(by_index)],
+        "lower_bound_propagation": lower,
+        "upper_bound_propagation": upper,
+        "lower_loss_upper_bound_fraction": lower_bound,
+        "upper_loss_upper_bound_fraction": upper_bound,
+        "maximum_loss_upper_bound_fraction": maximum,
+        "loss_threshold_fraction": threshold,
+        "observable_classification_robust": bool(
+            complete and maximum is not None and maximum < threshold
+        ),
+        "thermodynamic_consistency_policy": (
+            "Scale each full reversible Cantera reaction together; do not clip "
+            "one direction independently."
+        ),
+        "interpretation": (
+            "Collision ceilings bound retained-network rate influence; they do not "
+            "verify exact rates or establish reaction-network completeness."
+        ),
+    }
+
+
+def run_t95_sensitivity_attribution(
+    rmg_evidence: dict,
+    verification_plan: dict,
+    condition_contract: dict,
+    *,
+    route_ids: Iterable[str],
+    rmg_env: str | None,
+    perturbation_factor: float = 2.0,
+    timeout_seconds: float = 300.0,
+) -> dict:
+    """Estimate local logarithmic t95 sensitivities on the retained mechanism.
+
+    Each selected route is perturbed independently in both directions.  This
+    is a bounded allocation diagnostic; it neither verifies the rate nor
+    supplies the combined physical bounds required for terminal robustness.
+    """
+    factor = _finite(perturbation_factor)
+    if factor is None or factor <= 1.0:
+        raise ValueError("t95 sensitivity perturbation_factor must be greater than one")
+    requested = list(dict.fromkeys(str(route_id) for route_id in route_ids))
+    ranked = {
+        str(item.get("route_id")): item for item in verification_plan.get("ranked_routes") or []
+        if item.get("route_id")
+    }
+    if not requested or any(route_id not in ranked for route_id in requested):
+        raise ValueError("t95 sensitivity routes must be present in the retained verification plan")
+    payload = _propagation_payload(rmg_evidence, condition_contract)
+    from .rmg_bridge_client import run_rmg_bridge
+
+    records = []
+    for route_id in requested:
+        route = ranked[route_id]
+        reaction_indices = route.get("flux_reaction_indices") or []
+        if not reaction_indices or any(index is None for index in reaction_indices):
+            records.append({
+                "route_id": route_id,
+                "reaction_equation": route.get("reaction_equation"),
+                "status": "incomplete",
+                "reason": "retained_cantera_reaction_indices_missing",
+                "absolute_log_t95_sensitivity": None,
+            })
+            continue
+        lower_multipliers = {str(int(index)): 1.0 / factor for index in reaction_indices}
+        upper_multipliers = {str(int(index)): factor for index in reaction_indices}
+        try:
+            lower = run_rmg_bridge(
+                {**payload, "reaction_multipliers": lower_multipliers},
+                rmg_env=rmg_env,
+                timeout_seconds=timeout_seconds,
+            )
+            upper = run_rmg_bridge(
+                {**payload, "reaction_multipliers": upper_multipliers},
+                rmg_env=rmg_env,
+                timeout_seconds=timeout_seconds,
+            )
+            lower_t95 = _finite(lower.get("estimated_time_to_retention_seconds"))
+            upper_t95 = _finite(upper.get("estimated_time_to_retention_seconds"))
+            complete = (
+                _complete_propagation(lower) and _complete_propagation(upper)
+                and lower_t95 is not None and lower_t95 > 0.0
+                and upper_t95 is not None and upper_t95 > 0.0
+            )
+            sensitivity = (
+                abs((math.log(upper_t95) - math.log(lower_t95)) / (2.0 * math.log(factor)))
+                if complete else None
+            )
+            records.append({
+                "route_id": route_id,
+                "reaction_equation": route.get("reaction_equation"),
+                "status": "completed" if complete else "incomplete",
+                "reason": None if complete else "both_perturbations_must_complete_and_cross_t95",
+                "reaction_indices": [int(index) for index in reaction_indices],
+                "lower_rate_multiplier": 1.0 / factor,
+                "upper_rate_multiplier": factor,
+                "lower_multiplier_propagation": lower,
+                "upper_multiplier_propagation": upper,
+                "absolute_log_t95_sensitivity": sensitivity,
+            })
+        except Exception as error:
+            records.append({
+                "route_id": route_id,
+                "reaction_equation": route.get("reaction_equation"),
+                "status": "failed",
+                "reason": f"{type(error).__name__}: {error}",
+                "reaction_indices": [int(index) for index in reaction_indices],
+                "absolute_log_t95_sensitivity": None,
+            })
+    status = "completed" if records and all(item["status"] == "completed" for item in records) else "incomplete"
+    return {
+        "schema_version": 1,
+        "kind": "reaction_t95_sensitivity_attribution",
+        "status": status,
+        "perturbation_design": "independent_two_sided_logarithmic_finite_difference",
+        "perturbation_factor": factor,
+        "reactions": records,
+        "interpretation": (
+            "Local retained-network allocation sensitivities only; these are not rate verification, "
+            "global uncertainty propagation, or a terminal robustness envelope."
+        ),
     }
 
 
@@ -1396,6 +1926,224 @@ def run_combined_unresolved_sensitivity(
     }
 
 
+def prepare_combined_prediction_rate_bounds(
+    verification_plan: dict,
+    *,
+    rate_uncertainty_required_route_ids: Iterable[str] = (),
+    required_uncertainty_components_by_route: Mapping[str, Iterable[str]] | None = None,
+) -> dict:
+    """Prepare simultaneous multipliers for unresolved and calculated rates.
+
+    Unlike the legacy unresolved-only preparation, this contract also retains
+    uncertainty on a rate after its path and central value have been verified.
+    It uses the explicit multiplicative evidence already condition-matched by
+    the allocation planner and never interprets a calculated central value as
+    exact.
+    """
+    ranked = verification_plan.get("ranked_routes") or ()
+    calculated = {str(value) for value in rate_uncertainty_required_route_ids}
+    required_components = {
+        str(route_id): {str(component) for component in components}
+        for route_id, components in (required_uncertainty_components_by_route or {}).items()
+    }
+    required = [
+        item for item in ranked
+        if (_finite(item.get("gross_target_destruction_fraction")) or 0.0) > 0.0
+        and (not item.get("verified_replacement") or str(item.get("route_id")) in calculated)
+    ]
+    bounds = []
+    blockers = []
+    occupied: dict[int, str] = {}
+    for item in required:
+        route_id = str(item.get("route_id") or "")
+        uncertainty = item.get("rate_uncertainty_evidence") or {}
+        lower = _finite(uncertainty.get("lower_rate_multiplier"))
+        upper = _finite(uncertainty.get("upper_rate_multiplier"))
+        indices = item.get("flux_reaction_indices") or ()
+        reasons = []
+        if lower is None or upper is None or lower < 0.0 or lower > 1.0 or upper < 1.0:
+            reasons.append("multiplicative_uncertainty_missing_or_invalid")
+        if not uncertainty.get("source"):
+            reasons.append("uncertainty_provenance_missing")
+        retained_components = {
+            str(value) for value in uncertainty.get("uncertainty_components") or ()
+        }
+        missing_components = required_components.get(route_id, set()) - retained_components
+        if missing_components and "total_rate_model" not in retained_components:
+            reasons.append(
+                "uncertainty_components_missing:" + ",".join(sorted(missing_components))
+            )
+        if not indices or any(value is None for value in indices):
+            reasons.append("retained_reaction_index_missing")
+        normalized_indices = [int(value) for value in indices if value is not None]
+        for index in normalized_indices:
+            prior = occupied.get(index)
+            if prior is not None and prior != route_id:
+                reasons.append("reaction_index_maps_to_multiple_uncertain_routes")
+            occupied[index] = route_id
+        if reasons:
+            blockers.append({"route_id": route_id, "reasons": list(dict.fromkeys(reasons))})
+            continue
+        bounds.append({
+            "route_id": route_id,
+            "lower_rate_multiplier": lower,
+            "upper_rate_multiplier": upper,
+            "bound_source": uncertainty["source"],
+            "uncertainty_evidence": uncertainty,
+            "reaction_indices": normalized_indices,
+            "central_rate_status": (
+                "verified_calculated_rate" if item.get("verified_replacement")
+                else "unresolved_retained_rate"
+            ),
+        })
+    return {
+        "schema_version": 1,
+        "kind": "combined_prediction_rate_bound_preparation",
+        "status": "completed" if required and not blockers else "incomplete",
+        "uncertain_route_ids": sorted(str(item.get("route_id")) for item in required),
+        "rate_bounds": bounds,
+        "blocking_routes": blockers,
+        "interpretation": (
+            "Simultaneous condition-matched multiplicative bounds cover unresolved routes "
+            "and calculated central rates that still require uncertainty propagation."
+        ),
+    }
+
+
+def run_combined_prediction_rate_sensitivity(
+    repaired_rmg_evidence: dict,
+    condition_contract: dict,
+    *,
+    prepared_bounds: dict,
+    rmg_env: str | None,
+    timeout_seconds: float = 300.0,
+) -> dict:
+    """Propagate simultaneous lower/upper multipliers for a prediction claim."""
+    if prepared_bounds.get("status") != "completed":
+        raise ValueError("Prediction-rate bounds are incomplete")
+    lower_multipliers: dict[str, float] = {}
+    upper_multipliers: dict[str, float] = {}
+    for bound in prepared_bounds.get("rate_bounds") or ():
+        lower = _finite(bound.get("lower_rate_multiplier"))
+        upper = _finite(bound.get("upper_rate_multiplier"))
+        if lower is None or upper is None:
+            raise ValueError("Prediction-rate bound lacks finite multipliers")
+        for raw_index in bound.get("reaction_indices") or ():
+            key = str(int(raw_index))
+            if key in lower_multipliers:
+                raise ValueError(f"Reaction index {key} has duplicate uncertainty bounds")
+            lower_multipliers[key] = lower
+            upper_multipliers[key] = upper
+    payload = _propagation_payload(repaired_rmg_evidence, condition_contract)
+    from .rmg_bridge_client import run_rmg_bridge
+
+    lower_result = run_rmg_bridge(
+        {**payload, "reaction_multipliers": lower_multipliers},
+        rmg_env=rmg_env, timeout_seconds=timeout_seconds,
+    )
+    upper_result = run_rmg_bridge(
+        {**payload, "reaction_multipliers": upper_multipliers},
+        rmg_env=rmg_env, timeout_seconds=timeout_seconds,
+    )
+    complete = _complete_propagation(lower_result) and _complete_propagation(upper_result)
+    return {
+        "schema_version": 1,
+        "kind": "combined_prediction_rate_sensitivity",
+        "status": "completed" if complete else "incomplete",
+        "combined_perturbation": True,
+        "uncertain_route_ids": list(prepared_bounds["uncertain_route_ids"]),
+        "rate_bounds": list(prepared_bounds["rate_bounds"]),
+        "lower_bound_propagation": lower_result,
+        "upper_bound_propagation": upper_result,
+        "interpretation": (
+            "The envelope propagates uncertainty in calculated central rates as well as "
+            "unresolved retained rates; it is not evidence that either bound is exact."
+        ),
+    }
+
+
+def prepare_combined_unresolved_rate_bounds(
+    rmg_evidence: dict,
+    verification_plan: dict,
+) -> dict:
+    """Resolve explicit multiplicative uncertainty into condition-rate bounds.
+
+    The allocation planner has already condition-matched each uncertainty
+    record. This function still fails closed unless every unresolved nonzero-
+    flux route has a positive retained baseline rate with exactly matching
+    units.
+    """
+    candidates = list(rmg_evidence.get("candidate_routes") or ())
+    candidates.extend(_retained_network_routes(rmg_evidence))
+    by_id = {
+        str(route.get("route_id")): route
+        for route in candidates if route.get("route_id")
+    }
+    by_signature: dict[tuple, list[dict]] = {}
+    for route in candidates:
+        signature = reaction_signature(
+            route.get("reaction_equation") or route.get("equation") or "",
+            normalized=True,
+        )
+        if signature is not None:
+            by_signature.setdefault(signature, []).append(route)
+    bounds: list[dict] = []
+    blockers: list[dict] = []
+    unresolved = [
+        item for item in verification_plan.get("ranked_routes") or ()
+        if not item.get("verified_replacement")
+        and (_finite(item.get("gross_target_destruction_fraction")) or 0.0) > 0.0
+    ]
+    for item in unresolved:
+        route_id = str(item.get("route_id") or "")
+        route = by_id.get(route_id)
+        if route is None:
+            signature = reaction_signature(item.get("reaction_equation") or "", normalized=True)
+            matches = by_signature.get(signature, []) if signature is not None else []
+            route = matches[0] if len(matches) == 1 else None
+        uncertainty = item.get("rate_uncertainty_evidence") or {}
+        retained = (route or {}).get("retained_rate_evidence") or {}
+        baseline = _finite(retained.get("rate_coefficient_si"))
+        units = str(retained.get("rate_units") or "").strip()
+        lower = _finite(uncertainty.get("lower_rate_multiplier"))
+        upper = _finite(uncertainty.get("upper_rate_multiplier"))
+        reasons = []
+        if route is None:
+            reasons.append("retained_route_not_resolved")
+        if baseline is None or baseline <= 0.0:
+            reasons.append("positive_retained_baseline_rate_missing")
+        if not units:
+            reasons.append("retained_baseline_rate_units_missing")
+        if lower is None or upper is None or lower < 0.0 or upper < lower:
+            reasons.append("multiplicative_uncertainty_missing_or_invalid")
+        if not uncertainty.get("source"):
+            reasons.append("uncertainty_provenance_missing")
+        if reasons:
+            blockers.append({"route_id": route_id, "reasons": reasons})
+            continue
+        bounds.append({
+            "route_id": route_id,
+            "baseline_rate": baseline,
+            "lower_rate": baseline * lower,
+            "upper_rate": baseline * upper,
+            "units": units,
+            "bound_source": uncertainty["source"],
+            "uncertainty_evidence": uncertainty,
+        })
+    return {
+        "schema_version": 1,
+        "kind": "combined_unresolved_rate_bound_preparation",
+        "status": "completed" if unresolved and not blockers else "incomplete",
+        "unresolved_route_ids": sorted(str(item.get("route_id")) for item in unresolved),
+        "rate_bounds": bounds,
+        "blocking_routes": blockers,
+        "interpretation": (
+            "Absolute bounds are derived only from retained condition rates and explicit "
+            "condition-matched multiplicative uncertainty; no default factor is supplied."
+        ),
+    }
+
+
 def assess_repaired_mechanism(
     repaired_rmg_evidence: dict,
     replacements: Iterable[dict],
@@ -1403,7 +2151,10 @@ def assess_repaired_mechanism(
 ) -> dict:
     """Gate a repropagated mechanism after verified rate replacement."""
     replacements = list(replacements)
-    verified_ids, validation = _validated_replacement_ids(replacements, condition_contract)
+    conditional_model_only = any("forward_only_approximation_evidence" in item for item in replacements)
+    verified_ids, validation = _validated_replacement_ids(
+        replacements, condition_contract, allow_conditional_insertion=True,
+    )
     applied_rate_validation = [
         verify_applied_replacement(repaired_rmg_evidence, replacement, condition_contract)
         for replacement in replacements
@@ -1422,7 +2173,10 @@ def assess_repaired_mechanism(
     collision_violation_remains = bool(
         kinetics.get("status") != "passed" or kinetics.get("violation_count", 0)
     )
-    hard_blockers.extend(_solver_gates(repaired_rmg_evidence, max_closure_error=DEFAULT_MAX_FLUX_CLOSURE_ERROR))
+    hard_blockers.extend(_solver_gates(
+        repaired_rmg_evidence, condition_contract=condition_contract,
+        max_closure_error=DEFAULT_MAX_FLUX_CLOSURE_ERROR,
+    ))
     if hard_blockers:
         status = "rejected"
     elif collision_violation_remains:
@@ -1441,14 +2195,16 @@ def assess_repaired_mechanism(
         "status": status,
         "blocking_reasons": list(dict.fromkeys(blockers)),
         "hard_blocking_reasons": list(dict.fromkeys(hard_blockers)),
-        "terminal_kinetics_eligible": not hard_blockers and not collision_violation_remains,
+        "terminal_kinetics_eligible": (not hard_blockers and not collision_violation_remains
+                                       and not conditional_model_only),
+        "conditional_model_only": conditional_model_only,
         "replacement_validation": validation,
         "applied_rate_validation": applied_rate_validation,
         "expected_replacement_route_ids": sorted(expected_ids),
         "applied_replacement_route_ids": sorted(applied_ids & expected_ids),
         "estimated_time_to_retention_seconds": (
             propagation.get("estimated_time_to_retention_seconds")
-            if not hard_blockers and not collision_violation_remains else None
+            if not hard_blockers and not collision_violation_remains and not conditional_model_only else None
         ),
         "rule": "A repaired lifetime is unavailable until every replacement is validated, loaded, collision-safe, and repropagated with complete flux evidence.",
     }

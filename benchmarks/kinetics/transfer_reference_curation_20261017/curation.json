@@ -1,0 +1,163 @@
+{
+  "schema_version": 1,
+  "curation_date": "2026-10-17",
+  "status": "curation_incomplete",
+  "purpose": "Scoring-only reference curation for condition-locked known-reaction transfer tests; never prediction input.",
+  "protocol": "known_reaction_elementary_rate",
+  "development_status": "Inspected transfer/development references, not a blind prospective holdout.",
+  "ready_for_scoring": false,
+  "native_jobs_launched": 0,
+  "primary_document_bytes_retained": false,
+  "retention_note": "This manifest retains source-backed metadata, explicitly labelled abstract-level author fits and access outcomes. No full primary article or correction was acquired, so no reproducible full-table transcription is claimed.",
+  "rules": [
+    "An empty measured_rows list means measurements are not curated, not that the reaction has no experimental measurements.",
+    "Never substitute an author-fit evaluation or the NIST database's generated rate table for an individually measured row.",
+    "A reference cannot be locked for scoring until exact rows, conditions, units, uncertainty semantics and any corrections have been audited against primary documents.",
+    "References must remain outside prediction requests; bind the scoring artifact by its file hash.",
+    "Do not infer reaction-network completeness, product yields, atmospheric lifetime, general environmental support or an uncertainty distribution from these elementary-rate references.",
+    "Fit coefficients and their parameter errors are not independent per-temperature measurement errors; source correlations must be preserved."
+  ],
+  "cases": [
+    {
+      "case_id": "h_ch4",
+      "order": 1,
+      "reaction_equation": "H + CH4 -> H2 + CH3",
+      "observable": "forward elementary bimolecular rate coefficient k(T)",
+      "primary_source": {
+        "doi": "10.1021/j100155a033",
+        "url": "https://pubs.acs.org/doi/10.1021/j100155a033",
+        "citation": "Rabinowitz, Sutherland, Patterson and Klemm, J. Phys. Chem. 95 (1991), 674-681.",
+        "verified_scope": "Publisher-indexed bibliographic metadata and title establish a direct flash-photolysis/shock-tube H/methane study over 897-1729 K.",
+        "access": "Publisher search-index metadata accessible; direct primary-page retrieval returned HTTP 403; body and numerical tables not audited.",
+        "source_confidence": "bibliography_and_title_only"
+      },
+      "required_corrections": [
+        {
+          "doi": "10.1021/j100181a600",
+          "url": "https://pubs.acs.org/doi/10.1021/j100181a600",
+          "publisher_issue_url": "https://pubs.acs.org/toc/jpchax/96/2",
+          "citation": "Rabinowitz, Sutherland, Patterson and Klemm, J. Phys. Chem. 96 (1992), 1010, correction to the H/methane study.",
+          "existence_verified": true,
+          "body_audited": false,
+          "effect_on_original_data": "unknown",
+          "verification": "ACS issue table of contents associates the correction title/authors with this DOI; direct correction retrieval was unavailable. Do not assume it changes only typography or only fit parameters."
+        }
+      ],
+      "measurement_temperature_domain_K_from_title": [897.0, 1729.0],
+      "proposed_selection_targets_K_not_measurements": [1000.0, 1200.0, 1500.0],
+      "measured_rows": [],
+      "measured_rows_audited": false,
+      "conditions_audited": false,
+      "uncertainty_audited": false,
+      "corrections_audited": false,
+      "ready_for_scoring": false,
+      "author_fits": [],
+      "secondary_retrieval_leads_not_primary_evidence": [
+        {
+          "url": "https://kinetics.nist.gov/kinetics/Detail?id=1991RAB%2FSUT674-681%3A2",
+          "kind": "NIST database record, indexed text only; direct retrieval restricted by robots.txt",
+          "use": "Locate original conditions and original two-parameter fit; not an audited numerical comparator.",
+          "reported_bath_gas": "Ar",
+          "reported_pressure_range_bar": [0.02, 0.04],
+          "temperature_rounding_caveat": "NIST displays upper temperature 1730 K, versus 1729 K in the publisher title.",
+          "uncertainty_caveat": "Database parameter errors differ from other indexed abstract transcriptions. Resolve using the original article and correction rather than selecting a convenient value.",
+          "generated_table_caveat": "The database explicitly labels its T/k table as values calculated from the Arrhenius expression, not measured rows."
+        },
+        {
+          "url": "https://kinetics.nist.gov/kinetics/Detail?id=1991RAB%2FSUT674-681%3A1",
+          "kind": "NIST database limited-review entry",
+          "use": "Distinguish broader reviewed/fitted temperature coverage from the original direct measurements; do not score it as a second independent experiment."
+        }
+      ],
+      "missing_evidence": [
+        "Full original primary article with exact measurement table and page-level visual transcription audit.",
+        "Full 1992 correction and explicit reconciliation with the original measurements, rate fits and uncertainty.",
+        "Actual measured temperatures nearest the proposed 1000/1200/1500 K targets; no rounding of a fit table into measurements.",
+        "Primary pressure, bath composition/density, concentration ranges and state preparation for each retained row.",
+        "Primary treatment of secondary chemistry and any correction from observed atom decay to the elementary rate.",
+        "Rate units, measurement/fit uncertainty semantics, confidence level and shared calibration correlations."
+      ]
+    },
+    {
+      "case_id": "oh_h2",
+      "order": 2,
+      "reaction_equation": "OH + H2 -> H2O + H",
+      "observable": "forward elementary bimolecular rate coefficient k(T) and temperature dependence",
+      "primary_source": {
+        "doi": "10.1021/jp057035b",
+        "url": "https://pubs.acs.org/doi/10.1021/jp057035b",
+        "citation": "Orkin, Kozlov, Poskrebyshev and Kurylo, J. Phys. Chem. A 110 (2006), 6978-6985.",
+        "verified_scope": "Primary publisher abstract: flash-photolysis resonance-fluorescence measurements over 200-479 K, non-Arrhenius temperature dependence, two author fits and an overall uncertainty factor.",
+        "access": "Publisher abstract accessible through web search; full methods and measurement tables not audited. NASA publication page reproduces the abstract but links only to the publisher for the full article.",
+        "source_confidence": "primary_abstract_only",
+        "institutional_abstract_url": "https://esdpubs.nasa.gov/content/Rate_Constant_for_the_Reaction_of_OH_with_H2_between_200_and_480_K"
+      },
+      "required_corrections": [],
+      "correction_search_status": "No correction was identified in this bounded search; this is not a proof of absence.",
+      "measurement_temperature_domain_K_from_abstract": [200.0, 479.0],
+      "proposed_selection_targets_K_not_measurements": [298.0, 375.0, 450.0],
+      "measured_rows": [],
+      "measured_rows_audited": false,
+      "conditions_audited": false,
+      "uncertainty_audited": false,
+      "corrections_audited": false,
+      "ready_for_scoring": false,
+      "author_fits": [
+        {
+          "kind": "primary_abstract_author_fit_not_measurements",
+          "formula": "k(T) = A * (T / T_ref)^n * exp(-B / T)",
+          "temperature_domain_K": [250.0, 479.0],
+          "A_cm3_molecule_inverse_s_inverse": 4.27e-13,
+          "T_ref_K": 298.0,
+          "n": 2.406,
+          "B_K": 1240.0,
+          "source_locator": "Publisher abstract, high-temperature fit; also reproduced on NASA institutional abstract page.",
+          "measurement_rows_implied": false,
+          "scoring_admitted": false
+        },
+        {
+          "kind": "primary_abstract_author_fit_not_measurements",
+          "formula": "k(T) = A * exp(-B / T)",
+          "temperature_domain_K": [200.0, 250.0],
+          "A_cm3_molecule_inverse_s_inverse": 9.01e-13,
+          "B_K": 1526.0,
+          "B_reported_plus_minus_K": 70.0,
+          "B_error_confidence_semantics": "Not established by the accessible abstract; inspect full primary text.",
+          "source_locator": "Publisher abstract, low-temperature fit.",
+          "measurement_rows_implied": false,
+          "scoring_admitted": false
+        }
+      ],
+      "uncertainty_factor_from_primary_abstract": {
+        "formula": "f(T) = 1.04 * exp(50 K * abs(1/T - 1/(298 K)))",
+        "kind": "author_reported_overall_multiplicative_factor",
+        "reference_temperature_K": 298.0,
+        "factor_at_reference_temperature": 1.04,
+        "temperature_coefficient_K": 50.0,
+        "probability_distribution": null,
+        "confidence_level_primary_verified": null,
+        "caveat": "Do not assign independent Gaussian errors from this factor; confidence and correlation semantics require primary-text audit."
+      },
+      "secondary_retrieval_leads_not_primary_evidence": [
+        {
+          "url": "https://kinetics.nist.gov/kinetics/Detail?id=2006ORK%2FKOZ6978-6985%3A1",
+          "kind": "NIST database record, indexed text only; direct retrieval restricted by robots.txt",
+          "reported_pressure_range_bar": [0.022, 0.13],
+          "reported_pressure_dependence": "pressure independent",
+          "reported_uncertainty_confidence": "95% confidence limits",
+          "audit_status": "Leads only; not promoted to primary-audited conditions or confidence semantics.",
+          "generated_table_caveat": "NIST explicitly presents generated Arrhenius-expression values. Its exponent is rounded to 2.41; use neither these as measured rows nor rounded coefficients over the primary abstract's 2.406."
+        }
+      ],
+      "missing_evidence": [
+        "Full primary numerical table and page-level visual audit of actual measured temperatures and rate constants.",
+        "Pressure/bath composition, H2 purity and ortho/para preparation, concentrations and OH preparation relevant to comparison.",
+        "Uncertainty confidence level and shared systematic/correlation model checked against primary text, not just database comments.",
+        "Primary account of secondary reactions and the measured decay-to-elementary-rate reduction.",
+        "Predeclared OH electronic-state and H2 nuclear-spin/rotational population assumptions for the prediction, compared with experimental preparation."
+      ]
+    }
+  ],
+  "access_policy": "Only publisher metadata/abstract and official institutional/database sources were used. No paywall bypass, article purchase, external issue, contact request, package installation or chemistry execution occurred.",
+  "next_reference_action": "Provide lawful full copies of Rabinowitz 1991, its 1992 correction and Orkin 2006, or an accessible author/institutional archive; then audit exact selected rows and conditions before freezing scoring."
+}

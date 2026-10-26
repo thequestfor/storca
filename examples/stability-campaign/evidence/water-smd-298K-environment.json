@@ -1,0 +1,11 @@
+{
+  "solvent": "water",
+  "solvent_model": "SMD",
+  "temperature_K": 298.15,
+  "target_duration_seconds": 100.0,
+  "retention_fraction": 0.95,
+  "standard_state_mol_L": 1.0,
+  "volume_L": 1.0,
+  "light_condition": "dark",
+  "electronic_structure_profile": "b3lyp-def2-svp"
+}

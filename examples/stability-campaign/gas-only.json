@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "kind": "storca_stability_campaign_request",
+  "chemical_system": {
+    "target_component_id": "target",
+    "components": [
+      {
+        "component_id": "target",
+        "smiles": "CCO",
+        "charge": 0,
+        "multiplicity": 1,
+        "role": "target",
+        "identity_provenance": {"source": "user_input"}
+      }
+    ],
+    "material_context": {"description": "ethanol target identity"},
+    "user_declared_applicability_flags": {}
+  },
+  "observables": [
+    {
+      "observable_id": "target-t95",
+      "kind": "t95",
+      "target_component_id": "target",
+      "retention_fraction": 0.95,
+      "time_horizon_seconds": 86400.0
+    }
+  ],
+  "lane_requests": [
+    {
+      "lane_request_id": "dry-inert-298K",
+      "lane_id": "gas-dry-inert-v1",
+      "environment": {
+        "environment_kind": "homogeneous_gas",
+        "model_name": "storca_condition_spec_gas_v1",
+        "parameters": {
+          "scenario": "dry-inert-gas-screen",
+          "phase_model": "homogeneous gas-phase surrogate",
+          "temperature_K": 298.15,
+          "pressure_bar": 1.0,
+          "target_duration_seconds": 86400.0,
+          "retention_fraction": 0.95,
+          "light_condition": "dark"
+        }
+      },
+      "observable_ids": ["target-t95"],
+      "method_profile": "b3lyp-def2-svp",
+      "compute_budget": {
+        "maximum_orca_paths": 2,
+        "maximum_estimated_core_hours": 40.0
+      },
+      "evidence_inputs": [],
+      "user_assumptions": {}
+    }
+  ],
+  "global_compute_budget": {
+    "maximum_estimated_core_hours": 40.0
+  },
+  "campaign_policy": {
+    "mode": "environment_map",
+    "execution_policy": "prepare_only",
+    "continue_after_blocked_lane": true
+  },
+  "metadata": {
+    "name": "gas-only preparation example",
+    "scientific_use": "planning demonstration only"
+  }
+}
+

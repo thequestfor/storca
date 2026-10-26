@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "kind": "storca_scientific_panel_reference_freeze_verification",
+  "status": "source_and_software_progress_missing_prediction",
+  "chemistry_jobs_executed": 0,
+  "support_claim_allowed": false,
+  "calibration_claim_allowed": false,
+  "full_panel_freeze_or_experimental_validation_claimed": false,
+  "test_run": {
+    "command": "env PYTHONPATH=.:tests OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 /opt/homebrew/anaconda3/envs/orca-auto-py312/bin/python -m unittest test_scientific_panel test_specialist_rate_benchmark",
+    "exit_code": 0,
+    "tests_run": 47,
+    "result": "OK",
+    "runtime_seconds_test_runner_only": 0.974
+  },
+  "source_hashes": {
+    "storca/scientific_panel.py": "a0d6963269e2d5673c664bd1cadd16703f5283dc9fd96bb0aa6f52285cca51c8",
+    "tests/run_scientific_panel.py": "1baec4842ca5ee60442f0aa2d3ecae70b0f618dde80a41c8b2d4ba50a3025d14",
+    "tests/test_scientific_panel.py": "1d7b5fc583b4e41d3891882cf47c68f3031c5ce2b2ab234fe1a7132ce82e88b2",
+    "benchmarks/stability/scientific_panel.json": "edba373ce60f0c0d7959b968a1a5b687974a85c3a3e2287e66993075195bfbc9",
+    "benchmarks/stability/reference_sources/2026-10-06-jpl2011-hpl/source-audit.json": "383716999237c973f55bc1790311642d8ef73bc00397c7f0c02eb00de5da2c2d"
+  },
+  "original_source_dependencies_unchanged": {
+    "benchmarks/kinetics/reference_sources/2026-10-03-jpl2011/JPL_10-6.pdf": "7f4bf453adcea925b956025125a2cee5180d478a82406c8ae3625f79b20ab4f3",
+    "benchmarks/kinetics/reference_sources/2026-10-03-jpl2011/source-audit.json": "c89f336367266055aff118db5ac5303a143217852afbf52adede643f4844f4a9",
+    "benchmarks/kinetics/specialist_rate_manifest.json": "8123d303eb0a7bb5b2ada2f188821b3e184a9b90bfca987a7228ce29d359d53c"
+  },
+  "offline_replay": {
+    "command": "env PYTHONPATH=.:tests OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 /opt/homebrew/anaconda3/envs/orca-auto-py312/bin/python tests/run_scientific_panel.py --panel benchmarks/stability/scientific_panel.json --results current_storca=runs/scientific-panel-jpl-hpl-002/missing-predictions --output-dir runs/scientific-panel-jpl-hpl-002",
+    "report_path": "runs/scientific-panel-jpl-hpl-002/report.json",
+    "report_sha256": "6d0612c2f7122c181cd6d5c3325dbfcb6146a9f670ad1fec375179dc17b76690",
+    "prepared_requests_path": "runs/scientific-panel-jpl-hpl-002/prediction-requests.json",
+    "prepared_requests_sha256": "1fd53f9cfb8200018d64e834164efb407374422fd1c57650e58a2d67e42f537d",
+    "eligible_audited_comparators": 1,
+    "pending_reference_cases": 10,
+    "outcomes": {"missing": 1},
+    "comparison_scope": "rate_only_high_pressure_limit",
+    "rate_error_metrics": null,
+    "executed_chemistry_jobs_by_evaluator": 0,
+    "prediction_records_created": 0,
+    "earlier_report_preserved": "runs/scientific-panel-jpl-hpl-001/report.json",
+    "earlier_report_sha256": "4465010a3dbd59f3b8c948c594a20d64863252cd8acd6add745ae70b1b3d0ce6"
+  },
+  "limitations": [
+    "The original source supplies an evaluated, theory-informed high-pressure limit, not a direct independent finite-pressure experiment.",
+    "This freezes one descriptive reference comparator; no model prediction, method applicability, acceptance threshold or error calibration has been established.",
+    "The retained specialist production provider requires a finite-pressure contract and kinetics library and cannot consume a null-pressure HPL request as-is; no arbitrary finite pressure was supplied."
+  ]
+}

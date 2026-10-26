@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "kind": "storca_primary_reference_curation_checkpoint",
+  "curation_date": "2026-10-07",
+  "recorded_at_UTC": "2026-10-07 14:41:52 UTC",
+  "case_id": "oh-h2o2-low-temperature-vakhtin",
+  "status": "primary_fit_lead_retained_original_conditions_and_visual_table_audit_pending",
+  "quantitative_scoring_ready": false,
+  "execution_admitted": false,
+  "prediction_inputs_allowed": false,
+  "support_claim_allowed": false,
+  "calibration_claim_allowed": false,
+  "prospective_holdout": false,
+  "chemistry_jobs_executed": 0,
+  "shared_panel_modified": false,
+  "shared_panel_sha256_at_inspection": "edba373ce60f0c0d7959b968a1a5b687974a85c3a3e2287e66993075195bfbc9",
+  "source_identity": {
+    "authors": ["Andrei B. Vakhtin", "David C. McCabe", "A. R. Ravishankara", "Stephen R. Leone"],
+    "title": "Low-Temperature Kinetics of the Reaction of the OH Radical with Hydrogen Peroxide",
+    "citation": "J. Phys. Chem. A 2003, 107(49), 10642-10647",
+    "doi": "10.1021/jp030424q",
+    "publisher_url": "https://pubs.acs.org/doi/10.1021/jp030424q",
+    "publisher_online_date": "2003-11-11",
+    "publisher_issue_date": "2003-12-11",
+    "publisher_or_author_pdf_retained": false,
+    "metadata_verification": "Publisher-indexed article metadata and correctly typeset abstract were returned by web search. Subsequent direct publisher opens returned HTTP 403 or tool access errors. This is not a complete original-paper audit.",
+    "public_primary_reproduction_url": "https://www.lookchem.com/FreePDFArticle_3352-57-6_6438757.htm",
+    "reproduction_status": "Indexed primary-paper text was readable; full HTML archival retries returned HTTP 503. Reproduction is not the publisher and is not an independent secondary measurement."
+  },
+  "primary_abstract_formula_lead": {
+    "observable": "Empirical fit of measured bimolecular OH + H2O2 rate coefficients",
+    "rate_formula": "k1(T) = A * exp(B/T)",
+    "A": 6.8e-13,
+    "A_source_plus_minus": 1.0e-13,
+    "B_K": 285.0,
+    "B_source_plus_minus_K": 27.0,
+    "rate_units": "cm^3 molecule^-1 s^-1",
+    "temperature_range_K": [96.0, 296.0],
+    "source_kind": "primary_publisher_indexed_abstract",
+    "uncertainty_semantics_from_abstract": null,
+    "parameter_covariance": null,
+    "confidence_probability": null,
+    "statistical_distribution": null,
+    "individual_measurement_points_admitted": false,
+    "notes": [
+      "The official publisher abstract repairs the malformed plus/minus notation in the current NIST abstract lead.",
+      "Do not turn the two parameter error bars into an independent-normal rate prediction interval.",
+      "Do not replace measured Table 1 values by a formula-evaluated temperature grid.",
+      "This reference fit is not a STORCA error calibration or a microscopic mechanism certificate."
+    ]
+  },
+  "unaudited_measured_point_lead": {
+    "temperature_K": 296.0,
+    "rate": 1.78e-12,
+    "source_plus_minus": 0.19e-12,
+    "rate_units": "cm^3 molecule^-1 s^-1",
+    "primary_paper_location_lead": "Printed page 10644, room-temperature discussion following Figure 3; Table 1 on page 10645",
+    "source_text_error_definition_lead": "2 times combined standard uncertainty, incorporating statistical and systematic errors",
+    "source_evidence_status": "Publicly indexed reproduction text only; exact point, printed table and error definitions are NOT independently visually audited",
+    "pressure_bar": null,
+    "bath_gas": "nitrogen",
+    "composition": null,
+    "confidence_probability": null,
+    "eligible_for_scoring": false
+  },
+  "known_experimental_context_from_primary_abstract": {
+    "phase": "gas",
+    "low_temperature_environment": "pulsed Laval-nozzle nitrogen expansion with added hydrogen peroxide",
+    "photolytic_OH_precursor": "hydrogen peroxide",
+    "photolysis_wavelength_nm": 248.0,
+    "observed_signal": "OH laser-induced fluorescence",
+    "finite_pressure_bar": null,
+    "exact_initial_composition": null,
+    "macroscopic_fate_reference_available": false
+  },
+  "database_discrepancies_not_admitted": [
+    {
+      "url": "https://kinetics.nist.gov/kinetics/Detail?id=2003VAK%2FMCC10642-10647%3A1",
+      "literal_field": "Pressure: 1.90E11 - 9.90E11 bar",
+      "assessment": "Physically inconsistent with the described low-density flow. Original experimental pressure/density units must be checked; no corrected value or guessed number-density reinterpretation is supplied.",
+      "use_for_prediction_or_scoring": false
+    },
+    {
+      "url": "https://www.nist.gov/publications/low-temperature-kinetics-reaction-oh-radical-hydrogen-peroxide-0",
+      "literal_metadata_date": "2021-10-12",
+      "assessment": "This NIST web-record date is not the 2003 article publication year; publisher metadata identifies the actual article."
+    }
+  ],
+  "retained_assets": [
+    {
+      "path": "original-reproduction-asset-04.png",
+      "url": "https://file1.lookchem.com/html/freearticle/2022081712/6438757/img_04.png",
+      "sha256": "2ec96feba38b22d92ded7cbab40c657362d6b994adf4d60e7538a818b4e1468d",
+      "kind": "unaltered_public_reproduction_RGBA_asset",
+      "dimensions_pixels": [816, 1056],
+      "visual_audit": "Asset inspected. It contains graph raster content and table rules, while journal body/table text is carried separately in HTML. It does not provide a visually complete Table 1."
+    },
+    {
+      "path": "reproduction-asset-04-white-display.png",
+      "sha256": "4df5091e2beebefd0b2ca4c6ffa53cdd0befcc4c741f6ee981ec83d1bb6b81bb",
+      "kind": "display_only_alpha_on_white_render_not_original_source",
+      "render_operation": "Unaltered source alpha-composited onto white at original dimensions; no cropping, OCR, numerical insertion or generative reconstruction.",
+      "visual_audit": "Figures show 96, 110 and 165 K fits. No rate was digitized from the graph and no missing table text was reconstructed."
+    }
+  ],
+  "access_checks": [
+    {"url": "https://pubs.rsc.org/en/content/articlepdf/1974/f1/f19747001782", "result": "Redirect to unauthenticated abstract; no Barnard 1974 quantitative table acquired"},
+    {"url": "https://pubs.acs.org/doi/pdf/10.1021/jp030424q", "result": "Web-tool internal/access error; no PDF bytes acquired"},
+    {"url": "https://pubs.acs.org/doi/10.1021/jp030424q", "result": "Indexed primary abstract returned earlier; later direct request HTTP 403"},
+    {"url": "https://www.cchem.berkeley.edu/leonegrp/publications.html", "result": "Public redirect to migrated Google Sites publications.html, then HTTP 404"},
+    {"url": "https://commons.lbl.gov/download/attachments/102598308/Leone%2C%20Stephen_Publications%20from%20website.pdf?api=v2&modificationDate=1391734801111&version=1", "result": "HTTP 403; publication-list PDF not acquired"},
+    {"url": "https://www.lookchem.com/FreePDFArticle_3352-57-6_6438757.htm", "result": "One public link inspection succeeded; two complete HTML archive attempts subsequently returned HTTP 503 with no retained HTML bytes"},
+    {"surface": "Browser runtime", "result": "Setup succeeded but reported no browser available; documented discovery returned empty browser list. No install, alternate browser server or reconstructed screenshot used."}
+  ],
+  "next_exact_dependency": {
+    "required_artifact": "Legitimately accessible publisher or author copy of DOI 10.1021/jp030424q, or a complete original journal-page reproduction including text",
+    "required_pages": [10643, 10644, 10645, 10646],
+    "required_passages": ["Experimental setup and actual pressure/density/composition", "296 K direct measurement and Figure 3", "Complete Table 1 units, rows and footnotes", "Combined uncertainty and empirical-fit definitions"],
+    "action_after_acquisition": "Independently read and visually verify complete relevant pages, hash retained bytes, bind exact physical conditions and observation to a source audit; only then propose descriptive rate-only scoring."
+  }
+}

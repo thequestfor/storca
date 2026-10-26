@@ -1,0 +1,46 @@
+{
+  "target_species_id": "target",
+  "coverage_status": "verified_complete_within_declared_unimolecular_scope",
+  "coverage_claim_id": "claim:fixture:cyclobutane-unimolecular-coverage",
+  "discovery_sources": ["synthetic_regression_fixture"],
+  "unresolved_candidate_ids": [],
+  "species": [
+    {
+      "species_id": "target",
+      "smiles": "C1CCC1",
+      "initial_concentration_mol_L": 1.0,
+      "element_counts": {"C": 4, "H": 8},
+      "charge": 0
+    },
+    {
+      "species_id": "product",
+      "smiles": "CCC=C",
+      "initial_concentration_mol_L": 0.0,
+      "element_counts": {"C": 4, "H": 8},
+      "charge": 0
+    }
+  ],
+  "reactions": [
+    {
+      "reaction_id": "synthetic-ring-opening",
+      "reactant_id": "target",
+      "products": {"product": 1},
+      "molecularity": 1,
+      "rate_constant_s": 0.1,
+      "rate_units": "s^-1",
+      "temperature_K": 298.15,
+      "solvent": "water",
+      "solvent_model": "SMD",
+      "standard_state_mol_L": 1.0,
+      "verification_status": "verified_experimental_solution_rate",
+      "rate_theory": "experimental_solution_rate",
+      "source": "Synthetic analytical regression evidence; not experimental data",
+      "rate_claim_id": "claim:fixture:synthetic-ring-opening-rate",
+      "lower_rate_multiplier": 0.8,
+      "upper_rate_multiplier": 1.25,
+      "uncertainty_source": "Synthetic bounded regression interval",
+      "uncertainty_components": ["rate_measurement_or_model"],
+      "applicability_flags": {}
+    }
+  ]
+}

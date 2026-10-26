@@ -1,4 +1,7 @@
 from pathlib import Path
+import hashlib
+import math
+import json
 import os
 import re
 import signal
@@ -9,6 +12,12 @@ import time
 import queue
 import threading
 from collections.abc import Callable
+
+
+def _write_process_lease(path: Path, payload: dict) -> None:
+    temporary = Path(path).with_suffix(Path(path).suffix + ".tmp")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    temporary.replace(path)
 
 
 def _is_gnome_orca(executable: Path) -> bool:
@@ -169,6 +178,24 @@ def run_orca(
                 env=runtime_env,
                 start_new_session=True,
             )
+            lease_path = inp_file.with_suffix(".process.json")
+            lease = {
+                "schema_version": 1,
+                "kind": "storca_external_process_lease",
+                "engine": "orca",
+                "status": "running",
+                "pid": proc.pid,
+                "process_group_id": os.getpgid(proc.pid),
+                "input": str(inp_file),
+                "input_sha256": hashlib.sha256(inp_file.read_bytes()).hexdigest(),
+                "ncores": max(1, int((re.search(
+                    r"(?im)^\s*nprocs\s+(\d+)\s*$",
+                    inp_file.read_text(errors="replace"),
+                ) or [None, "1"])[1])),
+                "output": str(out_file),
+                "started_at_epoch": time.time(),
+            }
+            _write_process_lease(lease_path, lease)
 
             assert proc.stdout is not None
             lines: queue.Queue[str | None] = queue.Queue()
@@ -202,28 +229,43 @@ def run_orca(
                         pass
                     proc.wait()
 
-            while not ended:
-                if deadline is not None and time.monotonic() > deadline:
-                    _stop_process_group()
-                    raise subprocess.TimeoutExpired([ORCA_CMD, inp_file.name], timeout_seconds)
-                try:
-                    line = lines.get(timeout=0.2)
-                except queue.Empty:
-                    continue
-                if line is None:
-                    ended = True
-                    continue
-                f.write(line)
-                f.flush()
-                if stream_output(line):
-                    stopped_early = True
-                    _stop_process_group()
-                    ended = True
-            if not stopped_early:
-                proc.wait()
-            reader.join(timeout=5)
-            if proc.returncode != 0 and not stopped_early:
-                raise RuntimeError(f"ORCA failed: check {out_file}")
+            try:
+                while not ended:
+                    if deadline is not None and time.monotonic() > deadline:
+                        _stop_process_group()
+                        raise subprocess.TimeoutExpired([ORCA_CMD, inp_file.name], timeout_seconds)
+                    try:
+                        line = lines.get(timeout=0.2)
+                    except queue.Empty:
+                        continue
+                    if line is None:
+                        ended = True
+                        continue
+                    f.write(line)
+                    f.flush()
+                    if stream_output(line):
+                        stopped_early = True
+                        _stop_process_group()
+                        ended = True
+                if not stopped_early:
+                    proc.wait()
+                reader.join(timeout=5)
+                if proc.returncode != 0 and not stopped_early:
+                    raise RuntimeError(f"ORCA failed: check {out_file}")
+            except BaseException:
+                _stop_process_group()
+                raise
+            finally:
+                returncode = proc.poll()
+                _write_process_lease(lease_path, {
+                    **lease,
+                    "status": (
+                        "terminated" if returncode is not None
+                        else "runner_detached_process_may_be_active"
+                    ),
+                    "returncode": returncode,
+                    "ended_at_epoch": time.time(),
+                })
         if stopped_early:
             return {
                 "gbw": inp_file.with_suffix(".gbw"),
@@ -362,29 +404,41 @@ def run_rmg_supervised(
     with stdout_path.open("w") as stdout, stderr_path.open("w") as stderr:
         process = subprocess.Popen(command, cwd=input_file.parent, stdout=stdout, stderr=stderr,
                                    start_new_session=True, text=True)
-        while process.poll() is None:
-            now = time.monotonic()
-            mtime = heartbeat.stat().st_mtime if heartbeat.is_file() else None
-            if mtime != last_mtime:
-                last_mtime, last_change = mtime, now
-            if limit is not None and now - started > limit:
-                stop_reason = "hard_timeout"
-            elif heartbeat_timeout_seconds is not None and now - last_change > heartbeat_timeout_seconds:
-                stop_reason = "heartbeat_timeout"
-            if stop_reason:
-                os.killpg(process.pid, signal.SIGINT)
-                try:
-                    process.wait(timeout=30)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    process.wait()
-                break
-            if now >= next_progress:
-                elapsed = int(now - started)
-                state = "waiting for RMG.log" if not heartbeat.is_file() else "RMG.log active"
-                print(f"[STORCA {elapsed // 60:02d}:{elapsed % 60:02d}] RMG model generation running ({state})", flush=True)
-                next_progress = now + max(5.0, progress_interval_seconds)
-            time.sleep(max(0.1, poll_seconds))
+        try:
+            while process.poll() is None:
+                now = time.monotonic()
+                mtime = heartbeat.stat().st_mtime if heartbeat.is_file() else None
+                if mtime != last_mtime:
+                    last_mtime, last_change = mtime, now
+                if limit is not None and now - started > limit:
+                    stop_reason = "hard_timeout"
+                elif heartbeat_timeout_seconds is not None and now - last_change > heartbeat_timeout_seconds:
+                    stop_reason = "heartbeat_timeout"
+                if stop_reason:
+                    os.killpg(process.pid, signal.SIGINT)
+                    try:
+                        process.wait(timeout=30)
+                    except subprocess.TimeoutExpired:
+                        os.killpg(process.pid, signal.SIGKILL)
+                        process.wait(timeout=5)
+                    break
+                if now >= next_progress:
+                    elapsed = int(now - started)
+                    state = "waiting for RMG.log" if not heartbeat.is_file() else "RMG.log active"
+                    print(f"[STORCA {elapsed // 60:02d}:{elapsed % 60:02d}] RMG model generation running ({state})", flush=True)
+                    next_progress = now + max(5.0, progress_interval_seconds)
+                time.sleep(max(0.1, poll_seconds))
+        except BaseException as error:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.wait(timeout=5)
+            stdout.flush()
+            stderr.flush()
+            error.stdout = stdout_path.read_text(errors="replace")
+            error.stderr = stderr_path.read_text(errors="replace")
+            raise
     return {
         "command": command, "stdout": stdout_path.read_text(errors="replace"),
         "stderr": stderr_path.read_text(errors="replace"), "returncode": process.returncode,
@@ -394,20 +448,95 @@ def run_rmg_supervised(
     }
 
 
+def run_bounded_kinetics_command(
+    command: list[str], *, cwd: Path | None = None, timeout_seconds: float = 600.0,
+) -> subprocess.CompletedProcess:
+    """Bound a kinetics tool and its POSIX process group; retain timeout streams.
+
+    The default is a per-command safety ceiling, not a campaign compute budget.
+    Callers may supply a smaller remaining budget. No automatic retries occur.
+    """
+    if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+        raise ValueError("Kinetics command timeout must be finite and positive")
+    with subprocess.Popen(
+        command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, start_new_session=True,
+    ) as process:
+        try:
+            stdout, stderr = process.communicate(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired as error:
+            # Killing only conda can leave Arkane running and holding the pipes.
+            try:
+                if os.name == "posix":
+                    os.killpg(process.pid, signal.SIGKILL)
+                else:
+                    process.kill()
+            except ProcessLookupError:
+                pass
+            try:
+                stdout, stderr = process.communicate(timeout=5.0)
+            except subprocess.TimeoutExpired as cleanup_error:
+                stdout, stderr = cleanup_error.output, cleanup_error.stderr
+                process.stdout.close()
+                process.stderr.close()
+            def as_text(value):
+                return value.decode(errors="replace") if isinstance(value, bytes) else (value or "")
+            error.output = as_text(stdout)
+            error.stderr = as_text(stderr)
+            raise
+        except BaseException as error:
+            # A user interruption or outer budget exception must not leave
+            # conda's child running after the requesting workflow has stopped.
+            try:
+                if os.name == "posix":
+                    os.killpg(process.pid, signal.SIGKILL)
+                else:
+                    process.kill()
+            except ProcessLookupError:
+                pass
+            try:
+                stdout, stderr = process.communicate(timeout=5.0)
+            except subprocess.TimeoutExpired as cleanup_error:
+                stdout, stderr = cleanup_error.output, cleanup_error.stderr
+                process.stdout.close()
+                process.stderr.close()
+            error.stdout = stdout.decode(errors="replace") if isinstance(stdout, bytes) else (stdout or "")
+            error.stderr = stderr.decode(errors="replace") if isinstance(stderr, bytes) else (stderr or "")
+            raise
+        return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+
+
 def run_arkane(
     input_file: Path,
     rmg_env: str | None = "rmg_env",
     arkane_command: str = "Arkane.py",
+    *, timeout_seconds: float = 600.0,
+    statmech_contract: Path | None = None,
 ) -> dict:
     """Run Arkane in the RMG environment and retain its console streams."""
     input_file = Path(input_file)
     input_file.parent.mkdir(parents=True, exist_ok=True)
-    command = (["conda", "run", "-n", rmg_env, arkane_command, input_file.name]
-               if rmg_env else [arkane_command, input_file.name])
-    result = subprocess.run(command, cwd=input_file.parent, capture_output=True, text=True)
+    if statmech_contract is not None:
+        # Run the compatibility adapter in the selected RMG interpreter, not
+        # in STORCA's app environment. The launcher is a standalone script;
+        # no STORCA installation or installed-package mutation is required.
+        launcher = Path(__file__).resolve().parents[1] / "storca" / "arkane_launcher.py"
+        arguments = ["python", str(launcher), str(input_file.resolve()),
+                     str(Path(statmech_contract).resolve())]
+        command = (["conda", "run", "-n", rmg_env, *arguments]
+                   if rmg_env else arguments)
+    else:
+        command = (["conda", "run", "-n", rmg_env, arkane_command, input_file.name]
+                   if rmg_env else [arkane_command, input_file.name])
+    result = run_bounded_kinetics_command(
+        command, cwd=input_file.parent, timeout_seconds=timeout_seconds,
+    )
     if result.returncode != 0:
         error = RuntimeError(f"Arkane failed with exit code {result.returncode}")
         error.stdout = result.stdout  # type: ignore[attr-defined]
         error.stderr = result.stderr  # type: ignore[attr-defined]
         raise error
-    return {"command": command, "stdout": result.stdout, "stderr": result.stderr}
+    return {"command": command, "stdout": result.stdout, "stderr": result.stderr,
+            "timeout_seconds": timeout_seconds,
+            **({"statmech_contract": str(Path(statmech_contract).resolve())}
+               if statmech_contract is not None else {})}

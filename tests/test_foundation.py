@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -6,9 +7,10 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
 
-from src.inputgen import create_orca_input, create_orca_irc_input, create_orca_neb_ts_input, create_orca_relaxed_scan_input
+from src.inputgen import (create_orca_guided_scan_input, create_orca_input, create_orca_irc_input, create_orca_neb_ts_input,
+                          create_orca_optimization_recovery_input, create_orca_relaxed_scan_input)
 from src.inputgen import create_rmg_input
-from src.orca_runner import find_orca, find_xtb, run_arkane, run_rmg
+from src.orca_runner import find_orca, find_xtb, run_arkane, run_orca, run_rmg
 from src.parser import classify_chemkin_route, parse_chemkin_annotated, parse_orca_ir, parse_orca_orbitals
 from storca.runs import create_run_directory, write_metadata
 from storca.benchmark import compare_spectra
@@ -46,13 +48,15 @@ from storca.spectrum import (boltzmann_weights, build_ir_spectrum, format_spectr
                              resume_ir_spectrum, run_ir_spectrum, select_goat_conformers, _completed_optimization,
                              _write_ir_artifacts, assemble_self_dimer_environment)
 from storca.stability import (_reaction_space_budget, _recommended_rmg_database_libraries,
-                              _resolve_rmg_route_endpoints, resolve_stability_configuration,
+                              _resolve_rmg_route_endpoints, collect_orca_evidence,
+                              collect_rmg_evidence, resolve_stability_configuration,
                               run_stability_screen)
 from storca.conditions import build_condition_spec, normalize_target_environment_species
 from storca.reachability import enrich_candidate_route
 from storca.rmg_evidence import parse_final_solver_profile, parse_species_dictionary, time_to_retention_seconds
 from storca.rmg_execution import assess_rmg_execution, requested_time_coverage
-from storca.rmg_controller import convergence_comparison, restart_is_justified, staged_budgets
+from storca.rmg_controller import (convergence_comparison, restart_is_justified,
+                                   solver_policy_for_attempt, staged_budgets)
 from storca.condition_ladder import build_default_ladder, humid_air_scenario, run_condition_ladder
 from storca.intrinsic_initiation import enumerate_homolytic_cleavages
 from storca.photolysis import evaluate_sunlight_photolysis, integrate_photolysis_rate, sunlight_contract
@@ -94,6 +98,49 @@ class FoundationTests(unittest.TestCase):
             xyz.write_text("1\nhydrogen\nH 0 0 0\n")
             inp = create_orca_input(xyz, charge=0, multiplicity=1, freq=True, method_keywords=["B3LYP-3c"])
             self.assertIn("! B3LYP-3c Freq", inp.read_text())
+
+    def test_orca_stationary_point_recovery_input_retains_optimizer_strategy(self):
+        with tempfile.TemporaryDirectory() as temp:
+            xyz = Path(temp) / "input.xyz"
+            xyz.write_text("1\nhydrogen\nH 0 0 0\n")
+            inp = create_orca_optimization_recovery_input(
+                xyz,
+                charge=0,
+                multiplicity=2,
+                ncores=4,
+                max_iterations=400,
+                coordinate_system="cartesian",
+                calculate_hessian=True,
+                recalculate_hessian_every=5,
+                trust_radius=0.05,
+            )
+            text = inp.read_text()
+        self.assertIn("MaxIter 400", text)
+        self.assertIn("CoordSys cartesian", text)
+        self.assertIn("Calc_Hess true", text)
+        self.assertIn("Recalc_Hess 5", text)
+        self.assertIn("Trust 0.05000000", text)
+
+    def test_orca_guided_scan_coordinates_are_simultaneous(self):
+        with tempfile.TemporaryDirectory() as temp:
+            xyz = Path(temp) / "reactant.xyz"
+            xyz.write_text("3\ntest\nC 0 0 0\nC 1.5 0 0\nO 2.8 0 0\n")
+            inp = create_orca_guided_scan_input(
+                xyz,
+                coordinates=[
+                    {"atom_indices": [0, 1], "start_distance_angstrom": 1.5,
+                     "end_distance_angstrom": 2.8},
+                    {"atom_indices": [1, 2], "start_distance_angstrom": 1.3,
+                     "end_distance_angstrom": 1.1},
+                ],
+                charge=0,
+                multiplicity=2,
+                steps=12,
+            )
+            text = inp.read_text()
+        self.assertIn("Scan B 0 1 = 1.50000000, 2.80000000, 12 end", text)
+        self.assertIn("Scan B 1 2 = 1.30000000, 1.10000000, 12 end", text)
+        self.assertIn("Simul_Scan true", text)
 
     def test_run_directory_is_unique_and_has_metadata(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -266,11 +313,58 @@ class FoundationTests(unittest.TestCase):
         self.assertEqual(dossier["assessment"]["persistence_category"], "insufficient_evidence")
         self.assertTrue(dossier["species"]["spin_parity_consistent"])
 
+    def test_plausibility_spin_parity_counts_implicit_hydrogens(self):
+        doublet = create_plausibility_dossier("[CH3]", multiplicity=2)
+        singlet = create_plausibility_dossier("[CH3]", multiplicity=1)
+        self.assertEqual(doublet["species"]["electron_count"], 9)
+        self.assertTrue(doublet["species"]["spin_parity_consistent"])
+        self.assertFalse(singlet["species"]["spin_parity_consistent"])
+
     def test_plausibility_dossier_keeps_abstaining_after_rmg_route(self):
         dossier = create_plausibility_dossier("OO")
         attach_rmg_evidence(dossier, {"status": "completed", "search_outcome": "candidate_decomposition_pathway_identified"})
         self.assertEqual(dossier["assessment"]["persistence_category"], "insufficient_evidence")
         self.assertIn("candidate_decomposition_pathway_identified", dossier["risk_flags"])
+
+    @patch("storca.reaction_path._recover_endpoint_minimum")
+    @patch("storca.stability.run_optimization_and_frequency")
+    def test_parent_orca_evidence_recovers_a_symmetry_trapped_stationary_point(
+        self, optimize, recover,
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+
+            def initial(*args, **kwargs):
+                return {
+                    "optimized_xyz": folder / "input.xyz",
+                    "frequency_check": {
+                        "IsMinimum": False, "NumImaginary": 2,
+                        "AllFrequencies": [-120.0, -80.0],
+                    },
+                    "optimization": {"out": folder / "opt.out"},
+                    "frequency": {"out": folder / "freq.out"},
+                }
+
+            optimize.side_effect = initial
+            recover.return_value = {
+                "optimized_xyz": folder / "input.xyz",
+                "frequency_check": {
+                    "IsMinimum": True, "NumImaginary": 0,
+                    "AllFrequencies": [100.0] * 21,
+                },
+                "optimization": {"out": folder / "minimum-recovery" / "opt.out"},
+                "frequency": {"out": folder / "minimum-recovery" / "freq.out"},
+                "minimum_recovery": {"status": "validated_minimum"},
+            }
+            evidence = collect_orca_evidence("CCO", folder, timeout_seconds=17.0)
+
+        self.assertEqual(evidence["status"], "completed")
+        self.assertTrue(evidence["local_minimum"])
+        self.assertEqual(evidence["minimum_recovery"]["status"], "validated_minimum")
+        self.assertIn("minimum-recovery", evidence["artifacts"]["frequency_output"])
+        recover.assert_called_once()
+        self.assertEqual(optimize.call_args.kwargs["timeout_seconds"], 17.0)
+        self.assertEqual(recover.call_args.kwargs["timeout_seconds"], 17.0)
 
     def test_practical_profile_does_not_apply_unvalidated_oh_rule(self):
         features = describe_molecule("OCCO")
@@ -411,8 +505,9 @@ class FoundationTests(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as temp:
             result = run_stability_screen("CCO", Path(temp), auto_verify_routes=False)
-            self.assertEqual(result["assessment"]["status"], "no_loss_detected_in_rmg_model")
-            self.assertEqual(result["risk_flags"], [])
+            self.assertEqual(result["assessment"]["status"], "incomplete_evidence")
+            self.assertIn("mechanism_coverage_unresolved", result["risk_flags"])
+            self.assertFalse(result["mechanism_coverage"]["supports_observable_claim"])
             saved = json.loads(Path(result["result_json"]).read_text())
             self.assertIn("orca_evidence", saved)
             self.assertIn("rmg_evidence", saved)
@@ -451,7 +546,8 @@ class FoundationTests(unittest.TestCase):
             )
         collect_orca.assert_not_called()
         self.assertEqual(result["orca_evidence"]["reuse"]["status"], "validated_reuse")
-        self.assertEqual(result["assessment"]["status"], "no_loss_detected_in_rmg_model")
+        self.assertEqual(result["assessment"]["status"], "incomplete_evidence")
+        self.assertFalse(result["mechanism_coverage"]["supports_observable_claim"])
 
     @patch("storca.stability.collect_rmg_evidence")
     @patch("storca.stability.collect_orca_evidence")
@@ -466,8 +562,9 @@ class FoundationTests(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as temp:
             result = run_stability_screen("CCO", Path(temp), auto_verify_routes=False)
-            self.assertEqual(result["assessment"]["status"], "candidate_intrinsic_instability")
+            self.assertEqual(result["assessment"]["status"], "incomplete_evidence")
             self.assertIn("candidate_unimolecular_decomposition", result["risk_flags"])
+            self.assertIn("requested_reaction_discovery_incomplete", result["risk_flags"])
 
     @patch("storca.stability.collect_rmg_evidence")
     @patch("storca.stability.collect_orca_evidence")
@@ -494,8 +591,9 @@ class FoundationTests(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as temp:
             result = run_stability_screen("OO", Path(temp), auto_verify_routes=False)
-            self.assertEqual(result["assessment"]["status"], "condition_dependent_risk")
+            self.assertEqual(result["assessment"]["status"], "incomplete_evidence")
             self.assertIn("candidate_radical_or_impurity_initiated_pathway", result["risk_flags"])
+            self.assertIn("requested_reaction_discovery_incomplete", result["risk_flags"])
 
     def test_ir_parser_reads_fixture(self):
         modes = parse_orca_ir(FIXTURES / "orca_ir.out")
@@ -1700,6 +1798,39 @@ print('normal termination of xtb')
         self.assertEqual(result["first_t95_stage"], "dark-dry-air")
         self.assertEqual(result["stages"][3]["status"], "not_run_after_verified_t95")
 
+    def test_environment_map_runs_every_stage_after_an_early_verified_t95(self):
+        calls = []
+
+        def stage_runner(smiles, stage_dir, **kwargs):
+            calls.append(kwargs.get("scenario"))
+            verified = kwargs.get("scenario") == "ambient-air-gas-screen"
+            return {
+                "assessment": {"status": "orca_verified_condition_dependent_instability"},
+                "orca_evidence": {"status": "completed"}, "rmg_evidence": {"status": "completed"},
+                "condition_contract": {"scenario": kwargs.get("scenario"), "retention_fraction": 0.95},
+                "verification_summary": ({
+                    "status": "verified_t95_converged", "estimated_time_to_retention_seconds": 10.0,
+                    "condition_contract_match": True, "target_loss_fraction": 0.05,
+                    "verified_flux_coverage": 1.0, "unresolved_loss_upper_bound": 0.0,
+                } if verified else {"status": "not_required"}),
+                "kinetic_lifetime": {"estimated_time_to_retention_seconds": 10.0 if verified else None},
+            }
+
+        with tempfile.TemporaryDirectory() as temp:
+            result = run_condition_ladder(
+                "CCO", Path(temp), stage_runner=stage_runner, campaign_mode="environment_map",
+            )
+        self.assertEqual(result["verdict"], "environment_map_completed_with_verified_t95")
+        self.assertEqual(result["first_t95_stage"], "dark-dry-air")
+        self.assertEqual(result["campaign"]["executed_stage_count"], 6)
+        self.assertEqual(result["campaign"]["contract"]["requested_observable"], "t95")
+        self.assertEqual(result["lane_coverage"]["requested_lane_count"], 6)
+        self.assertEqual(result["lane_coverage"]["supported_lane_count"], 6)
+        self.assertEqual(result["lane_coverage"]["verified_observable_lane_count"], 1)
+        self.assertEqual(len(result["lane_results"]), 6)
+        self.assertFalse(any(stage["status"].startswith("not_run") for stage in result["stages"]))
+        self.assertEqual(len(calls), 4)
+
     def test_condition_ladder_serializes_stage_artifact_paths(self):
         def stage_runner(smiles, stage_dir, **kwargs):
             return {"kinetic_lifetime": {"estimated_time_to_retention_seconds": None},
@@ -1828,6 +1959,31 @@ print('normal termination of xtb')
         self.assertEqual(result["missing_evidence"], [])
 
 
+    @patch("src.orca_runner.find_orca", return_value="/test/orca")
+    @patch("src.orca_runner.subprocess.Popen")
+    def test_streaming_orca_runner_retains_process_lease(self, popen, _find_orca):
+        class FakeProcess:
+            pid = os.getpid()
+            stdout = iter(["ORCA TERMINATED NORMALLY\n"])
+            returncode = 0
+
+            def wait(self, timeout=None):
+                return 0
+
+            def poll(self):
+                return self.returncode
+
+        popen.return_value = FakeProcess()
+        with tempfile.TemporaryDirectory() as temp:
+            inp = Path(temp) / "job.inp"
+            inp.write_text("! B3LYP def2-SVP\n* xyz 0 1\nH 0 0 0\n*\n")
+            result = run_orca(inp, stream_output=lambda line: False, live_output=False)
+            lease = json.loads(inp.with_suffix(".process.json").read_text())
+        self.assertEqual(Path(result["out"]).resolve(), inp.with_suffix(".out").resolve())
+        self.assertEqual(lease["status"], "terminated")
+        self.assertEqual(lease["pid"], os.getpid())
+        self.assertEqual(lease["returncode"], 0)
+
     @patch("src.orca_runner.subprocess.run")
     def test_rmg_runner_applies_bounded_execution_options(self, run):
         with tempfile.TemporaryDirectory() as temp:
@@ -1877,6 +2033,66 @@ print('normal termination of xtb')
         evidence["execution_assessment"]["termination_reason"] = "missing_rmg_log"
         self.assertFalse(restart_is_justified(evidence))
 
+    def test_rmg_controller_uses_separate_bounded_daspk_recovery_policy(self):
+        evidence = {
+            "status": "incomplete",
+            "execution_assessment": {
+                "termination_reason": "daspk_initial_step_singularity",
+            },
+            "artifacts": {"seed": "/tmp/retained-seed"},
+        }
+        self.assertTrue(restart_is_justified(evidence))
+        first = solver_policy_for_attempt(evidence, recovery_number=1)
+        second = solver_policy_for_attempt(evidence, recovery_number=2)
+        self.assertEqual(first.policy_id, "rmg-daspk-initial-step-recovery-v1-1")
+        self.assertEqual((first.simulator_atol, first.simulator_rtol), (1e-14, 1e-7))
+        self.assertEqual((second.simulator_atol, second.simulator_rtol), (1e-12, 1e-6))
+        with tempfile.TemporaryDirectory() as temp:
+            input_file = create_rmg_input(
+                "stability", "NNONC", Path(temp),
+                simulator_atol=first.simulator_atol,
+                simulator_rtol=first.simulator_rtol,
+            )
+            content = input_file.read_text()
+        self.assertIn("atol=1e-14", content)
+        self.assertIn("rtol=1e-07", content)
+
+    @patch("storca.stability._collect_rmg_evidence_once")
+    def test_collect_rmg_evidence_retries_daspk_with_retained_seed_and_policy(self, collect):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            seed = root / "rmg" / "seed"
+            seed.mkdir(parents=True)
+            incomplete = {
+                "status": "incomplete",
+                "execution_assessment": {
+                    "termination_reason": "daspk_initial_step_singularity",
+                },
+                "artifacts": {"seed": str(seed)},
+                "candidate_routes": [],
+            }
+            completed = {
+                "status": "completed",
+                "execution_assessment": {"termination_reason": "normal_completion"},
+                "artifacts": {"seed": str(root / "retry-seed")},
+                "candidate_routes": [],
+            }
+            collect.side_effect = [incomplete, completed]
+            result = collect_rmg_evidence(
+                "NNONC", root, rmg_retry_attempts=2,
+                rmg_walltime="00:00:01:00",
+            )
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(collect.call_count, 2)
+        retry = collect.call_args_list[1].kwargs
+        self.assertEqual(retry["restart_from_seed"], seed)
+        self.assertEqual(retry["rmg_simulator_atol"], 1e-14)
+        self.assertEqual(retry["rmg_simulator_rtol"], 1e-7)
+        self.assertEqual(
+            result["controller"]["solver_policies"][1]["policy_id"],
+            "rmg-daspk-initial-step-recovery-v1-1",
+        )
+
     def test_rmg_controller_expands_only_declared_retry_budgets(self):
         budgets = staged_budgets({"walltime": "00:00:10:00", "max_processes": 4,
                                   "max_iterations": 100, "max_edge_species": 250}, 2)
@@ -1885,7 +2101,7 @@ print('normal termination of xtb')
         comparison = convergence_comparison([{"candidate_routes": []}, {"candidate_routes": []}])
         self.assertEqual(comparison["new_candidate_route_count"], 0)
 
-    @patch("src.orca_runner.subprocess.run")
+    @patch("src.orca_runner.run_bounded_kinetics_command")
     def test_arkane_runner_uses_the_rmg_environment(self, run):
         with tempfile.TemporaryDirectory() as temp:
             input_file = Path(temp) / "input.py"
@@ -2047,8 +2263,9 @@ print('normal termination of xtb')
             hessian.write_text("synthetic")
             irc = create_orca_irc_input(reactant, charge=0, multiplicity=1, hessian_file=hessian)
             self.assertIn('Product "product.xyz"', neb.read_text())
-            self.assertNotIn("PreOptEnds true", neb.read_text())
-            self.assertIn("PreOptEnds true", preoptimized_neb.read_text())
+            self.assertNotIn("PreOpt true", neb.read_text())
+            self.assertIn("PreOpt true", preoptimized_neb.read_text())
+            self.assertNotIn("PreOptEnds", preoptimized_neb.read_text())
             self.assertIn("B 0 1 = 0.70000000, 3.50000000, 20", scan.read_text())
             self.assertIn('Hess_Filename "ts.hess"', irc.read_text())
 

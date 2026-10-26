@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "kind": "storca_stability_campaign_request",
+  "chemical_system": {
+    "target_component_id": "target",
+    "components": [
+      {
+        "component_id": "target",
+        "smiles": "C1CCC1",
+        "charge": 0,
+        "multiplicity": 1,
+        "role": "target"
+      }
+    ],
+    "material_context": {"description": "synthetic verified-input solution regression"},
+    "user_declared_applicability_flags": {}
+  },
+  "observables": [
+    {
+      "observable_id": "target-t95",
+      "kind": "t95",
+      "target_component_id": "target",
+      "retention_fraction": 0.95,
+      "time_horizon_seconds": 100.0
+    }
+  ],
+  "lane_requests": [
+    {
+      "lane_request_id": "water-smd-298K",
+      "lane_id": "solution-neutral-implicit-v1",
+      "environment": {
+        "environment_kind": "homogeneous_solution",
+        "model_name": "implicit_solvent_constant_volume_unimolecular_v1",
+        "parameters": {
+          "solvent": "water",
+          "solvent_model": "SMD",
+          "temperature_K": 298.15,
+          "target_duration_seconds": 100.0,
+          "retention_fraction": 0.95,
+          "standard_state_mol_L": 1.0,
+          "volume_L": 1.0,
+          "light_condition": "dark",
+          "electronic_structure_profile": "b3lyp-def2-svp",
+          "phase_model": "homogeneous implicit solution"
+        }
+      },
+      "observable_ids": ["target-t95"],
+      "method_profile": "b3lyp-def2-svp",
+      "compute_budget": {"profile_points": 160},
+      "evidence_inputs": [
+        {
+          "input_id": "water-smd-environment",
+          "input_kind": "solution_environment",
+          "content_sha256": "sha256:f9b6883e7892acdf0756f65ec2a6bbe8fd72a6c339fb3bf0b72b348d2a3f1c5f",
+          "path": "evidence/water-smd-298K-environment.json",
+          "claim_id": "claim:fixture:water-smd-environment"
+        },
+        {
+          "input_id": "cyclobutane-verified-network",
+          "input_kind": "verified_solution_network",
+          "content_sha256": "sha256:bd15dbff1a391da924cf329012b35e71f0f520f49e73eafc5a20a675e33af357",
+          "path": "evidence/cyclobutane-verified-solution-network.json",
+          "claim_id": "claim:fixture:cyclobutane-unimolecular-coverage"
+        }
+      ],
+      "user_assumptions": {}
+    }
+  ],
+  "global_compute_budget": {"maximum_solution_lanes": 1},
+  "campaign_policy": {
+    "mode": "environment_map",
+    "execution_policy": "explicit_execute",
+    "continue_after_blocked_lane": true
+  },
+  "metadata": {
+    "name": "synthetic verified-input solution execution",
+    "warning": "The retained rate is synthetic regression evidence, not experimental chemistry."
+  }
+}

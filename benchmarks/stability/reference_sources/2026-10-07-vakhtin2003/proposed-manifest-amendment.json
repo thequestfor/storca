@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "kind": "storca_scientific_panel_metadata_amendment_proposal",
+  "proposal_date": "2026-10-07",
+  "status": "not_applied_root_review_required",
+  "base_manifest": "benchmarks/stability/scientific_panel.json",
+  "base_manifest_sha256": "edba373ce60f0c0d7959b968a1a5b687974a85c3a3e2287e66993075195bfbc9",
+  "case_id": "oh-h2o2-low-temperature-vakhtin",
+  "proposal_scope": "Citation and source-readiness metadata only; no scoring record, new observation point, prediction request, threshold or partition change",
+  "proposed_metadata": {
+    "source": "https://doi.org/10.1021/jp030424q",
+    "source_kind": "primary_publisher_indexed_abstract",
+    "source_location": "J. Phys. Chem. A 2003, 107(49), 10642-10647; exact Table 1 conditions and error definitions still require complete-page audit",
+    "reference_status": "primary_fit_notation_resolved_original_conditions_and_visual_table_audit_pending",
+    "temperature_range_K": [96, 296],
+    "reference_points": []
+  },
+  "proposed_limitations": [
+    "Publisher abstract supplies a correctly typeset empirical coefficient fit; the two source parameter uncertainties have no independently audited covariance or exact confidence probability here.",
+    "The NIST database pressure field is physically inconsistent and must not become an execution input.",
+    "The reproduced 296 K measured-point lead and its combined uncertainty are not visually frozen observations yet.",
+    "No full finite-pressure fate comparison or scientific-support promotion is admitted."
+  ],
+  "preserved": {"partition": "development", "acceptance_thresholds": null, "holdout_locked": false, "support_claim_allowed": false},
+  "future_reference_only_comparator": {
+    "candidate_observable": "Condition-matched measured OH + H2O2 bimolecular coefficient at 296 K",
+    "comparison_scope": "descriptive_rate_only_if_complete_original_conditions_audit_succeeds",
+    "point_eligibility_now": false,
+    "source_blind_request_rule": "Only genuine OH/H2O2 starting identities and separately audited physical conditions may enter production. Published rates, empirical-fit parameters, error bars, products, complexes, TS guesses and expected mechanism remain scoring-side only.",
+    "request_export_admitted_now": false,
+    "initial_concentrations_needed_for_coefficient_only": false,
+    "initial_concentrations_and_reactor_needed_for_fate": true
+  }
+}

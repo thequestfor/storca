@@ -19,6 +19,49 @@ class RmgBudget:
         return self.__dict__.copy()
 
 
+@dataclass(frozen=True)
+class RmgSolverPolicy:
+    """Numerical reactor policy, independent of mechanism-search resources."""
+
+    policy_id: str
+    simulator_atol: float
+    simulator_rtol: float
+    reason: str
+
+    def as_dict(self) -> dict:
+        return self.__dict__.copy()
+
+
+def solver_policy_for_attempt(
+    prior_evidence: dict | None,
+    *,
+    recovery_number: int,
+) -> RmgSolverPolicy:
+    """Select a bounded, auditable DASPK recovery without changing chemistry."""
+    reason = ((prior_evidence or {}).get("execution_assessment") or {}).get(
+        "termination_reason"
+    )
+    if reason != "daspk_initial_step_singularity":
+        return RmgSolverPolicy(
+            policy_id="rmg-default-simulator-v1",
+            simulator_atol=1e-16,
+            simulator_rtol=1e-8,
+            reason="default_solver_policy",
+        )
+    bounded = (
+        (1e-14, 1e-7),
+        (1e-12, 1e-6),
+    )
+    index = min(max(1, int(recovery_number)), len(bounded)) - 1
+    atol, rtol = bounded[index]
+    return RmgSolverPolicy(
+        policy_id=f"rmg-daspk-initial-step-recovery-v1-{index + 1}",
+        simulator_atol=atol,
+        simulator_rtol=rtol,
+        reason="bounded_recovery_after_daspk_initial_step_singularity",
+    )
+
+
 def _walltime(seconds: float) -> str:
     seconds = int(seconds)
     days, seconds = divmod(seconds, 86400)
@@ -47,13 +90,16 @@ def staged_budgets(resources: dict, attempts: int) -> list[RmgBudget]:
 
 
 def restart_is_justified(evidence: dict) -> bool:
-    """Restart only genuine resource exhaustion with a retained seed."""
+    """Restart only a recognized recoverable failure with a retained seed."""
     if evidence.get("status") != "incomplete":
         return False
     execution = evidence.get("execution_assessment") or {}
     reason = execution.get("termination_reason")
     seed = evidence.get("artifacts", {}).get("seed")
-    return reason == "resource_or_interrupt_termination" and bool(seed)
+    return reason in {
+        "resource_or_interrupt_termination",
+        "daspk_initial_step_singularity",
+    } and bool(seed)
 
 
 def convergence_comparison(attempts: list[dict]) -> dict:

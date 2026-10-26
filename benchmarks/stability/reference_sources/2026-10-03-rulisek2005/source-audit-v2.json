@@ -1,0 +1,169 @@
+{
+  "schema_version": 1,
+  "kind": "storca_scientific_panel_reference_audit",
+  "audit_date": "2026-10-03",
+  "status": "source_fitted_rate_observations_frozen_not_prediction_preregistration",
+  "predecessor_sha256": "c2de3e0fa5357a850801f56f052a3a4e3f3f22d9c6d3b321e82a57e6d53980b6",
+  "amendment_reason": "Precision correction to the audit description: relevant experimental/model/table passages, not a retained complete original PDF, were read. All numerical observations and source captures are unchanged.",
+  "prediction_inputs_allowed": false,
+  "support_claim_allowed": false,
+  "calibration_claim_allowed": false,
+  "prospective_holdout": false,
+  "publisher_or_author_full_pdf_retained": false,
+  "source_identity": {
+    "citation": "Rulisek, Sebek, Havlas, Hrabal, Capek and Svatos, J. Org. Chem. 2005, 70(16), 6295-6302.",
+    "title": "An Experimental and Theoretical Study of Stereoselectivity of Furan-Maleic Anhydride and Furan-Maleimide Diels-Alder Reactions",
+    "doi": "10.1021/jo050759z",
+    "publisher_url": "https://pubs.acs.org/doi/10.1021/jo050759z",
+    "primary_abstract_url": "https://pubmed.ncbi.nlm.nih.gov/16050690/",
+    "public_full_text_reproduction_url": "https://www.lookchem.com/FreePDFArticle_19878-26-3_6525750.htm",
+    "author_uploaded_primary_proof_url": "https://www.researchgate.net/profile/Ales-Svatos/publication/7694471_An_Experimental_and_Theoretical_Study_of_Stereoselectivity_of_Furan-Maleic_Anhydride_and_Furan-Maleimide_Diels-Alder_Reactions/links/5fd07894a6fdcc697bef8361/An-Experimental-and-Theoretical-Study-of-Stereoselectivity-of-Furan-Maleic-Anhydride-and-Furan-Maleimide-Diels-Alder-Reactions.pdf",
+    "primary_content_audit": "Read the publicly indexed author proof's relevant experimental, model and rate-table passages, then visually inspect the reproduced original journal tables, experimental procedure, model and fitting caveats. Publisher and primary-author abstract corroborate the 300 K forward rates. Retained artifacts are browser captures of publicly reproduced primary-paper content, not an archived publisher or author PDF.",
+    "retention_limitations": [
+      "Direct author-PDF download returned HTTP 403; indexed primary content was readable, but PDF bytes are not retained or hashed.",
+      "The institutional publisher copy and supporting information are explicitly audience-restricted; no restricted content was requested.",
+      "Public HTML retrieval returned HTTP 503; only the named visual source captures below are retained. Do not claim a retained full original source.",
+      "The reproduction host is not the publisher. Original table and primary-abstract consistency is checked, but an archival original source remains preferable."
+    ]
+  },
+  "sources": [
+    {
+      "source_id": "rulisek2005-tables",
+      "source_kind": "primary_paper_public_reproduction_capture",
+      "url": "https://www.lookchem.com/FreePDFArticle_19878-26-3_6525750.htm",
+      "path": "tables-1-3-public-primary-reproduction.png",
+      "sha256": "dbc4fe9352522eaa246b2a0e555dcbfc48bd5e194c958f0a5e35b73865c7cf9d",
+      "visual_audit": {"verified": true, "printed_pages": [6298], "locations": ["Tables 1-3, units, point estimates, interval estimates and confidence footnotes"]}
+    },
+    {
+      "source_id": "rulisek2005-experimental",
+      "source_kind": "primary_paper_public_reproduction_capture",
+      "url": "https://www.lookchem.com/FreePDFArticle_19878-26-3_6525750.htm",
+      "path": "experimental-methods-public-primary-reproduction.png",
+      "sha256": "4e7d302c051a6d58e7d282f3816c94b456abad5a89b2bd2d2877c4783d46013b",
+      "visual_audit": {"verified": true, "printed_pages": [6296], "locations": ["Section 2, Chemicals; H NMR Measurements and Estimation of Kinetic Constants"]}
+    },
+    {
+      "source_id": "rulisek2005-model",
+      "source_kind": "primary_paper_public_reproduction_capture",
+      "url": "https://www.lookchem.com/FreePDFArticle_19878-26-3_6525750.htm",
+      "path": "kinetic-model-public-primary-reproduction.png",
+      "sha256": "4b4dee5ad682262525360cc5d1efbbc46006d6ed07251f0079746e4262d6bbfc",
+      "visual_audit": {"verified": true, "printed_pages": [6297], "locations": ["Ideal-volume initial-concentration assumption; Bayesian fitting; reaction steps 1-6; concentration rate equations 7-9 and corresponding IV-VI definitions"]}
+    },
+    {
+      "source_id": "rulisek2005-model-exclusion",
+      "source_kind": "primary_paper_public_reproduction_capture",
+      "url": "https://www.lookchem.com/FreePDFArticle_19878-26-3_6525750.htm",
+      "path": "model-exclusion-public-primary-reproduction.png",
+      "sha256": "aedccd7ffe489e0b73a398713019a9b4077fcb45dab9b113f710e3d804c1dfac",
+      "visual_audit": {"verified": true, "printed_pages": [6297], "locations": ["Kinetics: exclusion of direct endo-exo conversion from the fitted model"]}
+    },
+    {
+      "source_id": "rulisek2005-fit-repetition",
+      "source_kind": "primary_paper_public_reproduction_capture",
+      "url": "https://www.lookchem.com/FreePDFArticle_19878-26-3_6525750.htm",
+      "path": "fit-repetition-public-primary-reproduction.png",
+      "sha256": "d97ae1c06932fbb7e6f3539ea11a38fb00726ff4d1720762a432f16d2f52d67d",
+      "visual_audit": {"verified": true, "printed_pages": [6298, 6299], "locations": ["Different initial reactant concentrations; kinetic measurements repeated twice; joint confidence limits"]}
+    },
+    {
+      "source_id": "rulisek2005-calibration-caveat",
+      "source_kind": "primary_paper_public_reproduction_capture",
+      "url": "https://www.lookchem.com/FreePDFArticle_19878-26-3_6525750.htm",
+      "path": "calibration-caveat-public-primary-reproduction.png",
+      "sha256": "c04bae303909b5c15cfd618329eb60c9fd2cd87c5abe8f4167b4bfe4a19b6f8a",
+      "visual_audit": {"verified": true, "printed_pages": [6299], "locations": ["Figures 3-4; NMR calibration and mass-balance caveat for longer 300 K measurements"]}
+    }
+  ],
+  "audited_observation_sets": [
+    {
+      "case_id": "furan-maleimide-solution-rulisek2005",
+      "partition": "development",
+      "source_ids": ["rulisek2005-tables", "rulisek2005-experimental", "rulisek2005-model", "rulisek2005-model-exclusion", "rulisek2005-fit-repetition", "rulisek2005-calibration-caveat"],
+      "transcription_frozen": true,
+      "source_fitted_rate_only_comparison_available": true,
+      "quantitative_scoring_ready": false,
+      "macroscopic_fate_comparison_ready": false,
+      "system": "Furan (source species 1) + maleimide (3), reversible formation of endo adduct 6 and exo adduct 7",
+      "observable": "Eight published point estimates and joint-fit interval widths for reversible concentration-law kinetic coefficients",
+      "reference_type": "primary_experimental_kinetic_model_fit",
+      "source_conditions": {
+        "phase": "homogeneous solution",
+        "solvent": "acetonitrile-d3",
+        "solvent_isotopic_formula": "CD3CN",
+        "temperature_grid_K": [300, 338],
+        "reactor": "screw-cap NMR tube",
+        "atmosphere": "argon",
+        "reaction_pressure_bar": null,
+        "light_condition": "not explicitly specified",
+        "initial_solvent_volume_mL": 0.5,
+        "initial_concentrations_mol_L": null,
+        "initial_concentration_method": "Known reactant volumes with ideal mixing and no volume contraction/expansion assumed; actual numerical volumes and initial concentrations are not tabulated.",
+        "concentration_coverage": "Experiments repeated twice with differing initial concentrations; plotted concentration trajectories are not transcribed as exact initial conditions.",
+        "concentration_regime_caveat": "Figures show finite reactant concentrations; dilution and concentration-independent activities must not be assumed from the word solution.",
+        "isotopic_substitution_allowed": false
+      },
+      "rate_convention": {
+        "source_channel_IV": "1 + 3 <-> 6 (endo)",
+        "source_channel_V": "1 + 3 <-> 7 (exo)",
+        "extent_rate_IV": "r_IV = k_IV_forward*c_1*c_3 - k_IV_reverse*c_6",
+        "extent_rate_V": "r_V = k_V_forward*c_1*c_3 - k_V_reverse*c_7",
+        "concentration_units": "mol/L",
+        "time_units": "s",
+        "forward_rate_units": "L mol^-1 s^-1",
+        "reverse_rate_units": "s^-1",
+        "source_original_forward_units": "mol^-1 l s^-1",
+        "status": "Parameters inferred from concentration trajectories under the authors' reversible kinetic model; not independently verified microscopic elementary mechanism or activity-based intrinsic rate constants."
+      },
+      "fit_uncertainty": {
+        "kind": "source_reported_joint_confidence_limits",
+        "joint_confidence_probability": 0.9545,
+        "table_representation": "Point estimate plus/minus interval estimate, retained as an interval half-width in that coefficient's units.",
+        "fitting_method": "Bayesian kinetic-model fit; isomer concentration responses included in the objective function.",
+        "independent_marginal_normal_intervals": false,
+        "covariance_matrix_available_in_audited_source": false,
+        "systematic_uncertainty_complete": false,
+        "propagation_allowed_as_independent_rate_errors": false
+      },
+      "experimental_total_uncertainty": null,
+      "observations": [
+        {"observation_id": "table2-IV-forward-300K", "source_table": 2, "temperature_K": 300, "source_channel": "IV", "adduct": "endo", "direction": "forward", "rate": 0.0000193, "rate_units": "L mol^-1 s^-1", "joint_fit_interval_half_width": 0.00000082},
+        {"observation_id": "table2-IV-reverse-300K", "source_table": 2, "temperature_K": 300, "source_channel": "IV", "adduct": "endo", "direction": "reverse", "rate": 0.00000548, "rate_units": "s^-1", "joint_fit_interval_half_width": 0.0000045},
+        {"observation_id": "table2-V-forward-300K", "source_table": 2, "temperature_K": 300, "source_channel": "V", "adduct": "exo", "direction": "forward", "rate": 0.0000138, "rate_units": "L mol^-1 s^-1", "joint_fit_interval_half_width": 0.00000055},
+        {"observation_id": "table2-V-reverse-300K", "source_table": 2, "temperature_K": 300, "source_channel": "V", "adduct": "exo", "direction": "reverse", "rate": 0.00000032, "rate_units": "s^-1", "joint_fit_interval_half_width": 0.00000017},
+        {"observation_id": "table3-IV-forward-338K", "source_table": 3, "temperature_K": 338, "source_channel": "IV", "adduct": "endo", "direction": "forward", "rate": 0.000167, "rate_units": "L mol^-1 s^-1", "joint_fit_interval_half_width": 0.000017},
+        {"observation_id": "table3-IV-reverse-338K", "source_table": 3, "temperature_K": 338, "source_channel": "IV", "adduct": "endo", "direction": "reverse", "rate": 0.000205, "rate_units": "s^-1", "joint_fit_interval_half_width": 0.000022},
+        {"observation_id": "table3-V-forward-338K", "source_table": 3, "temperature_K": 338, "source_channel": "V", "adduct": "exo", "direction": "forward", "rate": 0.000137, "rate_units": "L mol^-1 s^-1", "joint_fit_interval_half_width": 0.0000042},
+        {"observation_id": "table3-V-reverse-338K", "source_table": 3, "temperature_K": 338, "source_channel": "V", "adduct": "exo", "direction": "reverse", "rate": 0.00000332, "rate_units": "s^-1", "joint_fit_interval_half_width": 0.0000017}
+      ],
+      "source_only_ancillary_observations": {
+        "system": "Furan + maleic anhydride, Table 1 at 300 K; not an additional panel case",
+        "observations": [
+          {"source_channel": "I", "adduct": "endo", "direction": "forward", "rate": 0.0000175, "rate_units": "L mol^-1 s^-1", "joint_fit_interval_half_width": 0.0000048},
+          {"source_channel": "I", "adduct": "endo", "direction": "reverse", "rate": 0.000138, "rate_units": "s^-1", "joint_fit_interval_half_width": 0.0000003},
+          {"source_channel": "II", "adduct": "exo", "direction": "forward", "rate": 0.000031, "rate_units": "L mol^-1 s^-1", "joint_fit_interval_half_width": 0.0000055},
+          {"source_channel": "II", "adduct": "exo", "direction": "reverse", "rate": null, "source_reported_qualitative_rate": "approximately zero", "rate_units": "s^-1", "joint_fit_interval_half_width": null, "hard_zero_or_numeric_upper_bound_available": false}
+        ],
+        "source_unit_conflict": "The conclusion paragraph prints bimolecular units for the Table 1 endo reverse coefficient. The audited model equations and Table 1 explicitly identify it as first-order s^-1; retain the discrepancy rather than silently following the narrative units."
+      },
+      "allowed_rate_only_use": [
+        "Compare a separately produced coefficient at the same temperature, exact declared isotopic solvent, molecularity, channel/stereoisomer and concentration-law convention.",
+        "Numerical initial concentrations are not required to quote or compare a fitted coefficient. They are required to reconstruct a concentration-time, lifetime or time-dependent branching experiment.",
+        "Report point error and source joint-fit interval information descriptively; do not infer total uncertainty, calibration or independent normal rate distributions."
+      ],
+      "readiness_blockers": [
+        "Freeze a separate rate-only scoring protocol, identity/conditions and any scientifically justified acceptance thresholds before inspecting STORCA predictions; this source observation record is not that protocol.",
+        "Assess exact CD3CN applicability explicitly. Ordinary CH3CN continuum parameters are not silently equivalent to the experimental isotope solvent.",
+        "Match the reversible concentration-law fit and assess concentration/activity dependence, model identifiability and the unreported pressure; the fitted coefficient is not automatically an elementary intrinsic rate.",
+        "For lifetime, trajectories or product-distribution scoring, obtain actual initial concentrations, reactant volumes and observation timings or a preregistered uncertainty-aware digitization protocol; do not invent them.",
+        "Retain unquantified systematic uncertainty and the authors' NMR calibration/mass-balance caveat, especially longer 300 K experiments.",
+        "No joint covariance or complete systematic uncertainty is supplied; the reported half-widths do not define independent uncertain rates for network propagation.",
+        "Direct endo-exo interconversion was excluded by the authors using experimental lag and theoretical arguments; this is a model assumption, not a general proof of pathway absence.",
+        "Archive an openly accessible original primary PDF when available; retained public-reproduction captures are not an original publisher/author file."
+      ]
+    }
+  ],
+  "unknown_is_not_zero": ["experimental_total_uncertainty", "unreported pressure", "unreported exact initial concentrations", "joint covariance", "activity effects", "isotopic-solvent model discrepancy"],
+  "amendment_policy": "Preserve this source observation record and captures. Any corrected transcription requires a new dated record with predecessor hash; never adjust this reference or its readiness to obtain agreement with predictions."
+}

@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "kind": "storca_stability_campaign_request",
+  "chemical_system": {
+    "target_component_id": "target",
+    "components": [
+      {
+        "component_id": "target",
+        "smiles": "CCO",
+        "charge": 0,
+        "multiplicity": 1,
+        "role": "target"
+      }
+    ],
+    "material_context": {"description": "fail-closed future-lane demonstration"},
+    "user_declared_applicability_flags": {}
+  },
+  "observables": [
+    {
+      "observable_id": "target-t95",
+      "kind": "t95",
+      "target_component_id": "target",
+      "retention_fraction": 0.95,
+      "time_horizon_seconds": 86400.0
+    }
+  ],
+  "lane_requests": [
+    {
+      "lane_request_id": "periodic-surface",
+      "lane_id": "surface-periodic-v1",
+      "environment": {
+        "environment_kind": "periodic_surface",
+        "model_name": "future_periodic_surface_contract",
+        "parameters": {"surface_material": "user_must_define"}
+      },
+      "observable_ids": ["target-t95"],
+      "method_profile": null,
+      "compute_budget": {},
+      "evidence_inputs": [],
+      "user_assumptions": {}
+    },
+    {
+      "lane_request_id": "electrochemical-interface",
+      "lane_id": "electrochemical-interface-v1",
+      "environment": {
+        "environment_kind": "electrochemical_interface",
+        "model_name": "future_electrochemical_contract",
+        "parameters": {"potential_V": 0.0, "reference_electrode": "not_declared"}
+      },
+      "observable_ids": ["target-t95"],
+      "method_profile": null,
+      "compute_budget": {},
+      "evidence_inputs": [],
+      "user_assumptions": {}
+    }
+  ],
+  "global_compute_budget": {},
+  "campaign_policy": {
+    "mode": "environment_map",
+    "execution_policy": "prepare_only",
+    "continue_after_blocked_lane": true
+  },
+  "metadata": {
+    "name": "declared-only lane demonstration",
+    "expected_result": "both lanes remain declared_only and emit no observable"
+  }
+}
+

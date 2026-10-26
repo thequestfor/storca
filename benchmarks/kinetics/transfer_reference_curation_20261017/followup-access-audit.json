@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "kind": "storca_transfer_reference_access_followup",
+  "audit_date": "2026-10-17",
+  "purpose": "Scoring-only access followup; never prediction input.",
+  "original_curation_unchanged": true,
+  "new_audited_measurement_rows": 0,
+  "ready_for_scoring": false,
+  "primary_document_bytes_retained": false,
+  "native_jobs_launched": 0,
+  "bounded_followup": "Twelve targeted query/open attempts by the reference-review task, followed by direct checks of the original article, correction and NASA abstract. No accessible full measurement table or correction body was acquired.",
+  "sources": [
+    {
+      "case_id": "h_ch4",
+      "url": "https://pubs.acs.org/doi/10.1021/j100155a033",
+      "doi": "10.1021/j100155a033",
+      "outcome": "Direct primary retrieval returned HTTP 403. Bibliographic/indexed information is not the measured table."
+    },
+    {
+      "case_id": "h_ch4",
+      "url": "https://pubs.acs.org/doi/10.1021/j100181a600",
+      "doi": "10.1021/j100181a600",
+      "outcome": "Correction body remained inaccessible. Its effect on original data, fits or uncertainty is not established."
+    },
+    {
+      "case_id": "oh_h2",
+      "url": "https://esdpubs.nasa.gov/content/Rate_Constant_for_the_Reaction_of_OH_with_H2_between_200_and_480_K",
+      "doi": "10.1021/jp057035b",
+      "outcome": "Institutional abstract with publisher link, not an acquired full article or measured-row table."
+    }
+  ],
+  "rejected_leads": [
+    "An indexed ResearchGate excerpt is attached to a mismatched neighboring article title. It is not an admissible primary numerical source.",
+    "NIST-generated Arrhenius-expression tables are not individually measured rows.",
+    "No accessible institutional copy found in the bounded search is not proof that no lawful copy exists."
+  ],
+  "required_evidence": [
+    "Lawful full Rabinowitz 1991 article and 1992 correction, with explicit reconciliation.",
+    "Lawful full Orkin 2006 article for the subsequent OH + H2 comparison.",
+    "Page-level audit of actual measured rows, conditions, units, uncertainty and shared systematic/correlation semantics."
+  ],
+  "prediction_consequence": "Experimental scoring remains blocked; this does not manufacture a rate comparator or prohibit a separately authorized isolated-gas conditional prediction."
+}

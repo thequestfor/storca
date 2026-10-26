@@ -1,0 +1,172 @@
+{
+  "schema_version": 1,
+  "kind": "storca_p1_development_preregistration",
+  "case_id": "cyclobutene-cooper-walters1958-423K",
+  "status_at_registration": "pending_preflight",
+  "registered_date": "2026-09-29",
+  "partition": "development",
+  "holdout_locked": false,
+  "support_claim_allowed": false,
+  "predictions_inspected_at_registration": false,
+  "scope": "One bounded live development case for the existing gas-phase pipeline; not a validation of broad chemical or environmental coverage and not an admitted uncertainty calibration.",
+  "preflight_policy": {
+    "maximum_distinct_live_candidates_for_P1": 3,
+    "selected_candidate_order": ["cyclobutene-cooper-walters1958-423K"],
+    "other_candidates_selected": [],
+    "maximum_cores": 4,
+    "finite_run_budget_required": true,
+    "rule": "Start cyclobutene only. Any replacement requires a separate condition- and reference-locked preregistration before its preflight; the three-candidate cap is not a request to run three cases."
+  },
+  "chemical_system": {
+    "parent": {
+      "name": "cyclobutene",
+      "smiles": "C1=CCC1",
+      "charge": 0,
+      "multiplicity": 1
+    },
+    "expected_major_product_for_scoring_only": {
+      "name": "1,3-butadiene",
+      "smiles": "C=CC=C",
+      "charge": 0,
+      "multiplicity": 1
+    },
+    "pathway_injection_allowed": false,
+    "mechanism_expectation": "Thermal conrotatory ring opening, to be independently discovered and verified rather than supplied as a preverified route."
+  },
+  "conditions": {
+    "phase": "gas",
+    "environment": "homogeneous thermal gas; no irradiation",
+    "temperature_K": 423.15,
+    "pressure_bar": 0.0666611842,
+    "source_initial_pressure_mmHg": 50.0,
+    "pressure_conversion_note": "50 Torr converted to bar; the historical source labels pressure in mm Hg. This precision is a unit conversion, not experimental precision.",
+    "reactor": "isothermal ideal-gas batch model",
+    "initial_composition": [
+      {"smiles": "C1=CCC1", "mole_fraction": 1.0}
+    ],
+    "added_bath_gas": null,
+    "duration_s": 3600.0,
+    "retention_fraction": 0.95,
+    "model_vs_experiment_caveat": "The calculation omits material withdrawal used in the experiment; the first-order rate, rather than a raw closed-batch trajectory, is the primary comparator."
+  },
+  "requested_observables": [
+    "first_order_parent_loss_rate_s^-1",
+    "t95_s",
+    "parent_fraction_at_3600_s",
+    "dominant_parent_loss_product_and_verified_route"
+  ],
+  "reference": {
+    "citation": "Cooper, W.; Walters, W. D. The Thermal Isomerization of Cyclobutene. J. Am. Chem. Soc. 1958, 80, 4220-4224.",
+    "doi": "10.1021/ja01549a025",
+    "publisher_url": "https://pubs.acs.org/doi/10.1021/ja01549a025",
+    "primary_pdf_mirror": "https://electronicsandbooks.com/edt/manual/Magazine/J/Journal%20of%20the%20American%20Chemical%20Society%20US/1958%20%20%28vol%20080%29/16%20%20%284121-4438%29/4220-4224.pdf",
+    "source_kind": "primary_experiment",
+    "source_location": "Printed page 4222, Table II, reaction vessel A, sample II(c), initial pressure 50 mm Hg, first two rows.",
+    "reference_status": "primary_table_transcribed_visual_verification_pending",
+    "transcription": {
+      "method": "Web-indexed text of the primary PDF, including Table II headings and rows.",
+      "access_date": "2026-09-29",
+      "visual_page_verified": false,
+      "retained_pdf_sha256": null,
+      "caveat": "Direct PDF retrieval was unavailable during registration. Verify the source page visually before treating this transcription as an audited experimental reference. Do not silently replace these values if a correction becomes necessary; retain a dated amendment before scoring."
+    },
+    "rate_convention": "First-order rate inferred by the authors from butadiene formation; Table II reports 10^4 k with k in s^-1.",
+    "rows": [
+      {"conversion_percent": 22.0, "reported_1e4_k": 2.0, "k_s^-1": 0.0002},
+      {"conversion_percent": 44.0, "reported_1e4_k": 1.9, "k_s^-1": 0.00019}
+    ],
+    "primary_numeric_comparator": {
+      "k_s^-1": 0.000195,
+      "definition": "Arithmetic mean of the two registered rows; a fixed scoring comparator, not an additional measurement or fitted calibration.",
+      "experimental_total_uncertainty": null,
+      "confidence_level": null,
+      "row_spread_is_confidence_interval": false
+    },
+    "derived_comparators": {
+      "assumption": "Irreversible first-order parent loss using the registered midpoint rate, not an independently measured lifetime or trajectory.",
+      "t95_formula": "-ln(0.95)/k",
+      "t95_s": 263.0425353207722,
+      "half_life_formula": "ln(2)/k",
+      "half_life_s": 3554.6009259484376,
+      "parent_fraction_formula": "exp(-k*3600)",
+      "parent_fraction_at_3600_s": 0.49559312569265146
+    },
+    "pressure_applicability": "The source reports approximately pressure-independent first-order rates from 5 to 50 mm Hg at 150 C and falloff at lower pressures. This does not validate an arbitrary-pressure extension.",
+    "experimental_caveats": [
+      "Successive sampling ordinarily reduced pressure by about 3% per interval.",
+      "Sample II(c) was treated with anhydrous CuSO4 before reaction, not simulated as a CuSO4-containing reaction environment.",
+      "Unknown systematic and total experimental uncertainties are not zero."
+    ]
+  },
+  "acceptance": {
+    "accuracy": {
+      "observable": "first_order_parent_loss_rate_s^-1",
+      "reference": 0.000195,
+      "maximum_multiplicative_error": 3.0,
+      "inclusive_lower_s^-1": 0.000065,
+      "inclusive_upper_s^-1": 0.000585,
+      "meaning": "Development accuracy criterion only; neither an uncertainty distribution nor evidence for a calibrated confidence interval."
+    },
+    "mechanism": [
+      "Independently discover a route from cyclobutene to 1,3-butadiene and preserve competing discovered candidates.",
+      "Validate endpoints, a meaningful first-order saddle, and both IRC connections under the production verification contract.",
+      "Use the resulting elementary rate in repaired-network propagation with auditable provenance; reference agreement alone does not validate a mechanism.",
+      "The dominant propagated parent-loss product must be 1,3-butadiene for the declared conditions."
+    ],
+    "fresh_vs_controlled_resume": {
+      "relative_tolerance": 0.01,
+      "absolute_tolerance": 0.0,
+      "comparison_rule": "For each finite nonzero observable, abs(resumed-fresh)/abs(fresh) <= 0.01; zeros and censored values require matching status and explicit handling, not division by zero.",
+      "numeric_observables": ["first_order_parent_loss_rate_s^-1", "t95_s", "parent_fraction_at_3600_s"],
+      "scientific_statuses_must_match": true,
+      "completed_expensive_jobs_must_be_reused": true,
+      "duplicated_completed_expensive_jobs_allowed": false,
+      "interruption": "Controlled interruption at a recorded route checkpoint, followed by resume under unchanged scientific inputs.",
+      "artifact_identity": "Reused completed artifacts retain their hashes. Independently fresh numerical calculations need not be bit-identical."
+    },
+    "scientific_gates": {
+      "existing_uncertainty_and_coverage_gates_remain_required": true,
+      "existing_convergence_policy_may_be_weakened_for_this_case": false,
+      "reference_rates_may_calibrate_this_case": false,
+      "unresolved_may_be_reported_as_converged": false,
+      "case_pass_alone_establishes_general_support": false
+    }
+  },
+  "applicability_review": {
+    "expected_discovery_family": "Intra_2+2_cycloaddition_Cd (reverse Four_Ring_Open), present in the installed RMG default families; actual candidate extraction remains to be tested.",
+    "expected_existing_rate_lane": "One-reactant/one-product barriered canonical TST; the near-pressure-independent source regime motivates this local approximation, not universal pressure independence.",
+    "preflight_must_confirm": [
+      "The actual production discovery input generates the expected candidate without manual route injection.",
+      "The parent and product survive identity mapping and endpoint generation.",
+      "The method selector does not admit the case by silently suppressing a detected applicability concern."
+    ],
+    "unresolved_physical_risks": [
+      "Electronic-structure barrier error is not calibrated by selecting this reference case.",
+      "Heavy-atom tunneling and anharmonic effects cannot be presumed negligible at the requested temperature.",
+      "Product conformers, reaction-path degeneracy, rotational symmetry and any recrossing approximation require correct treatment.",
+      "Bounded discovery is not proof of complete mechanism coverage.",
+      "A validated IRC connection is not proof of single-reference electronic-structure accuracy."
+    ]
+  },
+  "uncertainty_evidence_review": {
+    "status": "no_condition_matched_total_rate_calibration_admitted",
+    "confidence_level": null,
+    "rate_multiplier_bounds": null,
+    "independent_theory_source": {
+      "citation": "Mandelli, G.; Aieta, C.; Ceotto, M. Heavy Atom Tunneling in Organic Reactions at Coupled Cluster Potential Accuracy with a Parallel Implementation of Anharmonic Constant Calculations and Semiclassical Transition State Theory. J. Chem. Theory Comput. 2022, 18, 623-637.",
+      "doi": "10.1021/acs.jctc.1c01143",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC8830048/",
+      "relevance": "Cyclobutene calculations compare electronic-structure and rate theories and expose tunneling and anharmonic sensitivity.",
+      "non_transferability": "B3LYP/6-31G*, MP2 and coupled-cluster results are not a condition-matched total-error calibration of STORCA B3LYP/def2-SVP plus its actual statistical-mechanical treatment."
+    },
+    "rule": "Use this literature as an applicability warning and a possible independent model comparison, not an invented confidence bound. Any future uncertainty record requires separately justified method, condition, component and provenance coverage; do not fit it to this development case's experimental rate."
+  },
+  "completion_requirements": [
+    "Retain all bounded RMG attempts and their resource and termination evidence.",
+    "Retain real endpoint, path, saddle, frequency, IRC, rate-generation and repaired-propagation evidence.",
+    "Record actual method profiles, versions, budgets, conditions and deterministic input identities.",
+    "Score the registered comparator and fresh/resume agreement without moving their thresholds after observing predictions.",
+    "Separate an engineering pass, central-rate accuracy pass and scientifically defensible conditional prediction; none implies the others.",
+    "If applicability, coverage, uncertainty or reference auditing remains unresolved, preserve that status and do not claim the P1 scientific gate has passed."
+  ]
+}

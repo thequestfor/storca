@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "kind": "storca_specialist_reference_source_audit",
+  "recorded_date": "2026-10-03",
+  "source": {
+    "citation": "Sander et al., Chemical Kinetics and Photochemical Data for Use in Atmospheric Studies, Evaluation No. 17, JPL Publication 10-6, 2011.",
+    "official_index_url": "https://science.jpl.nasa.gov/projects/data-evaluation/",
+    "official_download_url": "https://science.jpl.nasa.gov/documents/1489/JPL_10-6_Final_15June2011_20110620.pdf",
+    "original_registered_url": "https://jpldataeval.jpl.nasa.gov/pdf/JPL%2010-6%20Final%2015June2011_20110620.pdf",
+    "artifact": "benchmarks/kinetics/reference_sources/2026-10-03-jpl2011/JPL_10-6.pdf",
+    "sha256": "7f4bf453adcea925b956025125a2cee5180d478a82406c8ae3625f79b20ab4f3",
+    "size_bytes": 8993711,
+    "pdf_page_count": 684,
+    "access": "Public original evaluation obtained through the official NASA/JPL previous-evaluations link; ordinary bounded download, no authenticated session or access-control bypass.",
+    "identity_note": "Cover identifies Evaluation 17, JPL Publication 10-6, June 10 2011. PDF metadata title retains an unrelated draft-section title and is not used as the publication identity."
+  },
+  "visual_audit": {
+    "method": "Local Poppler PNG rendering and direct visual inspection of complete pages, corroborated by text extraction.",
+    "pages": [
+      {"pdf_page": 1, "printed_page": "cover", "scope": "Publication identity and date"},
+      {"pdf_page": 15, "printed_page": "1-2", "scope": "Section 1.2 f(T), absolute exponent, evaluator-assigned statistical caveats"},
+      {"pdf_page": 185, "printed_page": "2-1", "scope": "Section 2.1 molecular units, air bath and recommended falloff expression"},
+      {"pdf_page": 186, "printed_page": "2-2", "scope": "Bath/energy-transfer estimates and extrapolation assumptions"},
+      {"pdf_page": 187, "printed_page": "2-3", "scope": "High-pressure-limit estimation and Section 2.6 uncertainty semantics"},
+      {"pdf_page": 188, "printed_page": "2-4", "scope": "Full Table 2-1 page, column headings and B1/B2/D2/D3 rows"},
+      {"pdf_page": 191, "printed_page": "2-7", "scope": "Table footnotes: units, air bath and f(298) temperature equation"},
+      {"pdf_page": 192, "printed_page": "2-8", "scope": "Complete B1/B2 notes including bath sensitivity and competing OH channel"},
+      {"pdf_page": 195, "printed_page": "2-11", "scope": "Complete D2/D3 notes including exponent sign and air scaling"}
+    ],
+    "extraction_warning": "Whole-document pdftotext reports malformed-stream warnings elsewhere. Selected numerical rows and relevant assumptions were verified visually; no claim is made that all 684 pages were audited."
+  },
+  "audited_rows": [
+    {"case_id": "h-o2-association-air-300K-v1", "note": "B1", "k0_at_300_K": 4.4e-32, "n": 1.3, "kinf_at_300_K": 7.5e-11, "m": -0.2, "f_at_298_K": 1.3, "g_K": 50.0, "f_at_300_K": 1.30145495228246},
+    {"case_id": "oh-oh-association-air-300K-v1", "note": "B2", "k0_at_300_K": 6.9e-31, "n": 1.0, "kinf_at_300_K": 2.6e-11, "m": 0.0, "f_at_298_K": 1.5, "g_K": 100.0, "f_at_300_K": 1.5033594610833196},
+    {"case_id": "methyl-o2-association-air-300K-v1", "note": "D2", "k0_at_300_K": 4.0e-31, "n": 3.6, "kinf_at_300_K": 1.2e-12, "m": -1.1, "f_at_298_K": 1.1, "g_K": 50.0, "f_at_300_K": 1.1012311134697739},
+    {"case_id": "ethyl-o2-association-air-300K-v1", "note": "D3", "k0_at_300_K": 1.5e-28, "n": 3.0, "kinf_at_300_K": 8.0e-12, "m": 0.0, "f_at_298_K": 1.2, "g_K": 50.0, "f_at_300_K": 1.2013430328761168}
+  ],
+  "conventions": {
+    "k0_units": "cm^6 molecule^-2 s^-1",
+    "kinf_units": "cm^3 molecule^-1 s^-1",
+    "bath_gas": "air",
+    "temperature_dependence": "k0(T)=k0(300)*(T/300)^(-n); kinf(T)=kinf(300)*(T/300)^(-m)",
+    "reference_uncertainty_factor": "f(T)=f(298)*exp(g*abs(1/T-1/298))",
+    "statistical_distribution": null,
+    "confidence_probability": null,
+    "uncertainty_interpretation": "Evaluator-assigned multiplicative envelopes. Section 1.2 describes an approximate standard-deviation interpretation without rigorous statistical derivation; Section 2.6 discusses a two-sigma coverage objective. Neither establishes an exact confidence probability or independent parameter distributions.",
+    "independence": "The two limiting coefficients of a reaction are not independent calibration units. No independent errors are assigned to each pressure or temperature point."
+  },
+  "scientific_cautions": [
+    "These are evaluated recommendations, partly theory-assisted or extrapolated, not eight independent experimental measurements.",
+    "H+O2 collider sensitivity includes water; an air recommendation is not an N2-only or humid-gas reference.",
+    "OH+OH association is not total OH loss; the pressure-independent H2O+O channel and substantial discrepancies in the cited association measurements remain relevant.",
+    "Ethyl+O2 uses an evaluated air correction rather than directly measured air data at every pressure.",
+    "The published 0.6 broadening expression can define an evaluated-model comparator. Generated points would not become independently measured finite-pressure data or a locked holdout.",
+    "This audit supplies no electronic-structure error model, capture potential, energy-transfer calibration or mechanism-coverage calibration for STORCA."
+  ],
+  "development_amendment": {
+    "prior_manifest": "benchmarks/kinetics/reference_sources/2026-10-03-jpl2011/pre-amendment-manifest.json",
+    "prior_manifest_sha256": "55f708b2bb3a5300b0d493124e3f9777d11e59a33a1a77dd61c236830af46c61",
+    "change": "Eight 300 K reference factors now use the published temperature correction rather than copying f(298). Added explicit non-probabilistic reference semantics.",
+    "central_rates_unchanged": true,
+    "conditions_unchanged": true,
+    "acceptance_thresholds_unchanged": true,
+    "partitions_unchanged": true,
+    "holdout_locked": false
+  },
+  "claims": {
+    "limiting_rate_reference_audit_complete": true,
+    "independent_finite_pressure_measurements_audited": false,
+    "storca_rate_error_calibration": false,
+    "supported_capture_or_master_equation_lane": false,
+    "p1_gate_achieved": false,
+    "quantum_jobs_executed": 0
+  }
+}

@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "kind": "storca_primary_table_visual_audit_handoff",
+  "recorded_date": "2026-10-03",
+  "case_id": "cyclobutene-cooper-walters1958-423K",
+  "status": "indexed_primary_table_reconfirmed_visual_audit_unresolved",
+  "frozen_inputs": {
+    "preregistration": {
+      "path": "benchmarks/stability/p1_cyclobutene_development.json",
+      "sha256": "e3bb76d6c3588f91b2d252c40a2a43b88878dce3710d26148114e2b592ae2e4a"
+    },
+    "panel": {
+      "path": "benchmarks/stability/scientific_panel.json",
+      "sha256": "fbb9a89b45df00b4936d1529487466715c11a7be43024e7195c6ba492364ef90"
+    },
+    "preceding_access_review": {
+      "path": "benchmarks/stability/reference_sources/2026-10-03-p1-access/source-access-review.json",
+      "sha256": "65ff9f6ce8062c6d21261fbc5c1a0901547b659cfe39bf9fa0f83b1ac86f8ff3"
+    },
+    "changed": false
+  },
+  "source": {
+    "doi": "10.1021/ja01549a025",
+    "publisher_url": "https://pubs.acs.org/doi/10.1021/ja01549a025",
+    "registered_primary_content_mirror": "https://electronicsandbooks.com/edt/manual/Magazine/J/Journal%20of%20the%20American%20Chemical%20Society%20US/1958%20%20%28vol%20080%29/16%20%20%284121-4438%29/4220-4224.pdf",
+    "required_location": "Printed page 4222, Table II, reaction vessel A, sample II(c), two 50 mm Hg rows.",
+    "original_pdf_retained": false,
+    "original_pdf_sha256": null,
+    "visual_page_retained": false,
+    "visual_page_sha256": null,
+    "visual_page_verified": false
+  },
+  "bounded_access_observations": [
+    {
+      "method": "Web primary-publisher page open",
+      "result": "Abstract URL returns HTTP 403. Indexed publisher metadata describes PDF-only content without present access."
+    },
+    {
+      "method": "Web publisher PDF open",
+      "result": "PDF URL not accessible through retrieval tool."
+    },
+    {
+      "method": "Web registered-mirror PDF open and page-2 screenshot",
+      "result": "Direct open timed out; screenshot could not resolve an application/pdf source. No page image was returned."
+    },
+    {
+      "method": "Ordinary curl HEAD with connection limit 10 s and total limit 35 s",
+      "result": "Restricted-network attempt exited 6 (DNS resolution). One permitted-network check exited 7 after 4.226 s (connection failure on port 443). Neither produced a PDF or screenshot."
+    },
+    {
+      "method": "Focused search for exact DOI, article title and Table II",
+      "result": "Indexed primary-content transcription is available, but no independently accessible original visual copy was located."
+    }
+  ],
+  "indexed_text_crosscheck_not_visual_audit": {
+    "source_kind": "Search-indexed text attributed to the registered original-paper mirror; not a secondary review and not an archived PDF",
+    "temperature_C": 150,
+    "vessel": "A",
+    "sample": "II(c)",
+    "initial_pressure_mmHg": 50,
+    "rate_heading_multiplier": 10000,
+    "rate_unit": "s^-1",
+    "rows": [
+      {"conversion_percent": 22, "reported_1e4_k": 2.0, "k_s^-1": 0.0002},
+      {"conversion_percent": 44, "reported_1e4_k": 1.9, "k_s^-1": 0.00019}
+    ],
+    "frozen_midpoint_k_s^-1": 0.000195,
+    "crosscheck_matches_registered_values": true,
+    "context_crosschecks": [
+      "The pressure column is initial pressure, not a maintained-pressure reactor specification.",
+      "Successive withdrawals commonly lower pressure by approximately 3 percent per interval.",
+      "The treatment label c denotes anhydrous CuSO4 pretreatment, not CuSO4 present in the modeled reacting system.",
+      "The indexed source locally reports similar first-order rates from 5 to 50 mm Hg and decreasing rates below that range."
+    ],
+    "search_index_warning": "A separate first-page search response misreads the page number and activation-energy exponent. This independently cautions against treating indexed OCR as visual source validation. No Arrhenius fit or alternate rate replaces the preregistered rows.",
+    "experimental_total_uncertainty": null,
+    "confidence_level": null,
+    "row_spread_is_confidence_interval": false
+  },
+  "required_next_prerequisite": {
+    "input": "A lawfully accessible original article or authorized visual copy supplied by the user, author or existing institutional access; no purchase, login manipulation, challenge bypass or paywall workaround.",
+    "audit": [
+      "Hash and retain the supplied original file with its source and access provenance.",
+      "Render and inspect the complete printed page 4222 with table headings, two registered rows and footnotes; retain render hash, source page index and rendering command.",
+      "Inspect the relevant full experimental, temperature-control, analytical and pressure passages on the surrounding article pages, rather than only a cropped table.",
+      "Record which uncertainties are stated and which remain unknown; do not infer a confidence interval from two rounded rates.",
+      "Document agreement or contradiction against the frozen comparator. Any correction requires a dated explicit amendment before scoring, not an overwrite."
+    ]
+  },
+  "scientific_gate_achieved": false,
+  "reference_promotion_allowed": false,
+  "rate_calibration_claim_allowed": false,
+  "support_claim_allowed": false,
+  "chemistry_jobs_executed": 0,
+  "quantum_budget_changes": 0,
+  "scope": "Curation handoff only. No original PDF or visual table audit was obtained; no acceptance, prediction, calibration or model-applicability claim is promoted."
+}

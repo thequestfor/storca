@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "kind": "storca_scientific_panel_curation",
+  "status": "independent_experimental_rate_slice_proposed_not_merged",
+  "holdout_locked": false,
+  "support_claim_allowed": false,
+  "calibration_claim_allowed": false,
+  "evaluation_harness": {
+    "module": "storca/scientific_panel.py",
+    "driver": "tests/run_scientific_panel.py",
+    "maximum_case_count": 12,
+    "mode": "offline_retained_prediction_scoring",
+    "request_export": "explicit_input_projection_without_scoring_references",
+    "support_or_calibration_promotion_allowed": false
+  },
+  "scope": "One primary measured descriptive bimolecular gas coefficient. Separate slice, not an expansion of the shared eleven-case manifest plus optional P1; no whole-reactor, pressure-independence, mechanism, method-validation or execution claim.",
+  "acceptance_thresholds": null,
+  "parent_panel_unchanged": {
+    "path": "../../scientific_panel.json",
+    "sha256": "edba373ce60f0c0d7959b968a1a5b687974a85c3a3e2287e66993075195bfbc9",
+    "case_count": 11,
+    "optional_P1_case_count": 1,
+    "merge_applied": false,
+    "pending_entries_removed": false
+  },
+  "cases": [
+    {
+      "case_id": "berg2024-oh-methane-air-340p3K-rate-v1",
+      "partition": "development",
+      "classes": [
+        "gas",
+        "radical_plus_neutral",
+        "bimolecular",
+        "hydrogen_transfer",
+        "rate_only",
+        "primary_experiment"
+      ],
+      "system": "Separated hydroxyl radical and methane",
+      "source": "https://doi.org/10.5194/acp-24-13715-2024",
+      "source_kind": "primary_absolute_gas_rate_experiment",
+      "source_location": "Supplement Table S1, printed page 1 (PDF page 2); main Eq. 2 and uncertainty paragraph, printed page 13718 (PDF page 4); methane mixing ratio, printed page 13720 (PDF page 6); main Table 1, printed page 13721 (PDF page 7).",
+      "reference_status": "audited_descriptive_measured_bimolecular_rate_only_comparator",
+      "reference_audit": {
+        "path": "source-audit.json",
+        "sha256": "db9c551f3ed9d49c0ed7b4a362b5ef2e97220146ac84906bb765cb9e66936fcd"
+      },
+      "prediction_request": {
+        "chemical_system": {
+          "parent": {
+            "name": "Separated hydroxyl radical and methane",
+            "smiles": "[OH].C",
+            "charge": 0
+          }
+        },
+        "conditions": {
+          "phase": "gas",
+          "environment": "humidified synthetic air",
+          "temperature_K": 340.3,
+          "pressure_bar": 1,
+          "pressure_regime": "finite_pressure_experimental_nominal",
+          "reactor": "temperature-controlled flow tube",
+          "initial_composition": [
+            {
+              "smiles": "[OH]",
+              "charge": 0,
+              "multiplicity": 2
+            },
+            {
+              "smiles": "C",
+              "mole_fraction": 0.000063,
+              "charge": 0,
+              "multiplicity": 1
+            }
+          ],
+          "added_bath_gas": "Synthetic air (N2/O2 exact ratio unreported); approximately 1.3% H2O; O3 20-50 ppbv."
+        },
+        "requested_observables": [
+          "bimolecular_OH_loss_rate_coefficient"
+        ],
+        "budget": {}
+      },
+      "scoring": {
+        "reference_status": "audited",
+        "expected_disposition": "prediction",
+        "observable_scope": "rate_only_measured_bimolecular_coefficient",
+        "applicability_assessment": "unresolved",
+        "maximum_rate_multiplicative_error": null,
+        "experimental_uncertainty": null,
+        "rate": {
+          "value": 1.4e-14,
+          "units": "cm^3 molecule^-1 s^-1",
+          "convention": "bimolecular_OH_loss_coefficient_number_density_OH_times_CH4"
+        },
+        "reference_uncertainty": {
+          "kind": "published_point_plus_minus_with_unresolved_sigma_and_shared_systematics",
+          "point_id": "S1-A-01",
+          "published_rate_plus_minus": 7e-16,
+          "rate_units": "cm^3 molecule^-1 s^-1",
+          "published_temperature_plus_minus_K": 0.6,
+          "point_sigma_multiplier": null,
+          "temperature_sigma_multiplier": null,
+          "confidence_probability": null,
+          "statistical_distribution": null,
+          "total_experimental_uncertainty": null,
+          "shared_systematics_group": "berg2024-oh-methane-all-canisters",
+          "canister_preparation_groups": [
+            "A",
+            "B"
+          ],
+          "independent_validation_study_count": 1,
+          "independent_observation_count": null,
+          "storca_rate_error_calibration": false,
+          "methods_general_methane_accuracy": {
+            "relative_percent": 12,
+            "sigma_multiplier_as_reported": 2,
+            "methane_concentration_relative_percent": 8,
+            "concentration_sigma_multiplier_as_reported": 2
+          },
+          "table1_room_temperature_summary_as_printed": {
+            "temperature_K": 294,
+            "rate": 6.1e-15,
+            "rate_plus_minus": 1e-15,
+            "sigma_multiplier_in_caption": 2,
+            "rate_units": "cm^3 molecule^-1 s^-1",
+            "selected_as_target": false
+          },
+          "interpretation": "S1 prints per-point plus/minus values without a sigma definition in its caption. Do not assign the main-table 2-sigma caption to S1. Methods state 12% 2-sigma methane accuracy; Table 1's printed 6.1+/-1.0 corresponds to about 16.4%, not 12%. Preserve both, do not repair or choose the smaller uncertainty, and do not claim exact coverage or independent-point calibration."
+        },
+        "provenance": {
+          "citation": "Berg, F., Novelli, A., Dubus, R., Hofzumahaus, A., Holland, F., Wahner, A., and Fuchs, H. (2024). Temperature-dependent rate coefficients for the reactions of OH radicals with selected alkanes, aromatic compounds, and monoterpenes. Atmospheric Chemistry and Physics 24, 13715-13731. doi:10.5194/acp-24-13715-2024.",
+          "publisher_url": "https://acp.copernicus.org/articles/24/13715/2024/",
+          "source_kind": "primary_absolute_gas_rate_experiment",
+          "source_location": "Supplement Table S1, printed page 1 (PDF page 2); main Eq. 2 and uncertainty paragraph, printed page 13718 (PDF page 4); methane mixing ratio, printed page 13720 (PDF page 6); main Table 1, printed page 13721 (PDF page 7).",
+          "point_id": "S1-A-01"
+        }
+      },
+      "limitations": [
+        "Experimental finite-pressure coefficient at nominal 1000 hPa, not a measured high-pressure limiting rate or proof of pressure independence. Reaction pressure is not the 3.5 hPa detector or 350 kPa preparation-canister pressure.",
+        "Exact N2/O2 ratio, per-point pressure and composition uncertainties, raw fluorescence curves and a shared systematic covariance matrix are not given here. Nominal reported composition is not silently completed with air fractions or ozone midpoint.",
+        "The paper discusses impurities and does not exclude a larger influence from highly reactive trace contaminants; published accuracy is not an independently verified bound on all errors.",
+        "S1 point errors are not total calibrated confidence intervals; Table 1 and methods accuracy differ. These are retained observations, not zero uncertainty or a tuned acceptance tolerance.",
+        "OH+CH4 is chemically plausible for the existing conventional gas TS/frequency/IRC and Arkane boundary. No independent atom-mapped candidate, verified stationary points, rate, total path degeneracy or method applicability has been produced for this case.",
+        "A gas high-pressure TST result cannot be renamed as this finite-pressure measured coefficient without a retained applicability argument. H-transfer tunneling, OH electronic-state statistical weights, symmetry-equivalent total loss rather than a per-H path, recrossing and model accuracy remain unresolved.",
+        "No reference product identity, expected route, fitted Arrhenius coefficients or source evidence may be exported as production input. No parent lifetime, product distribution, full flow-tube chemistry or elementary-mechanism ground truth is scored.",
+        "One proposed scalar panel comparator does not validate the fourteen-point temperature dependence. All measurements remain frozen together as one source study, not fourteen independent validation cases.",
+        "No chemistry execution budget, acceptance threshold, prospective holdout, supported-network claim or uncertainty calibration is created."
+      ]
+    }
+  ]
+}
+

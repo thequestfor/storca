@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "kind": "storca_reference_access_review",
+  "recorded_date": "2026-10-03",
+  "case_id": "cyclobutene-cooper-walters1958-423K",
+  "frozen_preregistration": {
+    "path": "benchmarks/stability/p1_cyclobutene_development.json",
+    "sha256": "e3bb76d6c3588f91b2d252c40a2a43b88878dce3710d26148114e2b592ae2e4a",
+    "changed": false
+  },
+  "source": {
+    "doi": "10.1021/ja01549a025",
+    "citation": "Cooper, W.; Walters, W. D. The Thermal Isomerization of Cyclobutene. J. Am. Chem. Soc. 1958, 80, 4220-4224.",
+    "required_visual_location": "Printed page 4222, Table II, vessel A, sample II(c), first two 50 mm Hg rows."
+  },
+  "bounded_access_checks": [
+    {
+      "url": "https://pubs.acs.org/doi/10.1021/ja01549a025",
+      "role": "publisher primary source",
+      "result": "HTTP 403 on direct page open; indexed metadata reports PDF-only content and no current access",
+      "table_seen_visually": false
+    },
+    {
+      "url": "https://pubs.acs.org/doi/pdf/10.1021/ja01549a025",
+      "role": "publisher original PDF",
+      "result": "not accessible through the web retrieval tool",
+      "table_seen_visually": false
+    },
+    {
+      "url": "https://electronicsandbooks.com/edt/manual/Magazine/J/Journal%20of%20the%20American%20Chemical%20Society%20US/1958%20%20%28vol%20080%29/16%20%20%284121-4438%29/4220-4224.pdf",
+      "role": "registered public primary-content mirror",
+      "result": "indexed text remains available; direct open timed out",
+      "table_seen_visually": false
+    }
+  ],
+  "retrieval_scope": "One focused search and one three-URL open batch; no authenticated session, paywall bypass, purchase, or repeated download loop.",
+  "original_pdf_retained": false,
+  "visual_page_verified": false,
+  "reference_status": "provisional_visual_audit_pending",
+  "reference_values_changed": false,
+  "rate_calibration_claim_allowed": false,
+  "scientific_gate_achieved": false,
+  "required_next_evidence": "A lawfully accessible visual copy of the registered table and relevant condition/uncertainty passages, retained with provenance and hashes. Do not substitute a later review rate or Arrhenius fit for the frozen comparator without an explicit dated amendment.",
+  "chemistry_jobs_executed": 0
+}

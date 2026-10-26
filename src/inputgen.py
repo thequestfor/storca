@@ -1,14 +1,63 @@
 # src/inputgen.py
 from pathlib import Path
+import math
 import subprocess
 import textwrap
 import re
 import shutil
+import hashlib
+
+from .orca_job_settings import NativeJobSettings, apply_native_job_settings
 
 
 class XTBNotFoundError(RuntimeError):
     """Raised when xTB executable is required but not found."""
     pass
+
+
+def normalize_thermochemistry_temperature(value: float) -> float:
+    """One finite positive temperature; grids need a separate result contract."""
+    if isinstance(value, bool):
+        raise ValueError("Thermochemistry temperature must be one finite positive number")
+    try:
+        temperature = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError("Thermochemistry temperature must be one finite positive number") from error
+    if not math.isfinite(temperature) or temperature <= 0.0:
+        raise ValueError("Thermochemistry temperature must be one finite positive number")
+    return temperature
+
+
+def orca_frequency_temperature_input_evidence(input_path: Path, temperature_K: float) -> dict:
+    """Prove one explicit %freq Temp request without executing ORCA.
+
+    This narrow producer emits a single thermochemistry temperature. Multiple
+    blocks/temperatures and implicit defaults cannot supply explicit evidence.
+    """
+    temperature = normalize_thermochemistry_temperature(temperature_K)
+    input_path = Path(input_path)
+    if not input_path.is_file():
+        raise ValueError("Requested-temperature thermochemistry input evidence is missing")
+    data = input_path.read_bytes()
+    text = data.decode("utf-8", errors="replace")
+    keyword_lines = " ".join(re.findall(r"(?m)^\s*!([^\n]*)", text))
+    if not re.search(r"\b(?:Freq|AnFreq|NumFreq)\b", keyword_lines, flags=re.IGNORECASE):
+        raise ValueError("Thermochemistry temperature evidence requires a frequency input")
+    blocks = re.findall(r"%freq\b(.*?)\bend\b", text, flags=re.IGNORECASE | re.DOTALL)
+    if len(blocks) != 1:
+        raise ValueError("Thermochemistry requires exactly one explicit %freq temperature block")
+    declarations = re.findall(r"\b(?:Temp|T)\s+([^\n#]+)", blocks[0], flags=re.IGNORECASE)
+    if len(declarations) != 1 or not re.fullmatch(r"\s*[-+0-9.Ee]+\s*", declarations[0]):
+        raise ValueError("Thermochemistry requires one temperature, not a grid or conflicting overrides")
+    retained = normalize_thermochemistry_temperature(declarations[0].strip())
+    if not math.isclose(retained, temperature, rel_tol=1e-14, abs_tol=1e-10):
+        raise ValueError("Retained frequency input temperature differs from the requested temperature")
+    return {
+        "status": "matched", "source_input": str(input_path),
+        "source_input_sha256": hashlib.sha256(data).hexdigest(),
+        "requested_temperature_K": temperature, "input_temperature_K": retained,
+        "orca_control": "%freq Temp", "temperature_count": 1,
+    }
 
 
 def create_orca_input(
@@ -23,6 +72,9 @@ def create_orca_input(
     use_goat: bool = False,  # if True, generate GOAT/xTB input
     b97: bool = False, # if true, use b973c
     method_keywords: list[str] | None = None,
+    preserve_existing: bool = False,
+    thermochemistry_temperature_K: float | None = None,
+    native_settings: NativeJobSettings | None = None,
 ) -> Path:
     """
     Generate an ORCA input file.
@@ -39,6 +91,8 @@ def create_orca_input(
         ncores: Number of CPU cores.
         use_goat: If True, generate GOAT/xTB input.
         b97: If true, use b97-3c
+        thermochemistry_temperature_K: Explicit single thermochemistry temperature
+            for Freq only. None preserves the legacy ORCA default input bytes.
 
     Returns:
         Path to the generated ORCA input file.
@@ -53,6 +107,11 @@ def create_orca_input(
 
     if ncores < 1:
         raise ValueError("ncores must be at least 1")
+    temperature = None
+    if thermochemistry_temperature_K is not None:
+        if not freq or use_goat:
+            raise ValueError("Explicit thermochemistry temperature requires a frequency job, not GOAT")
+        temperature = normalize_thermochemistry_temperature(thermochemistry_temperature_K)
 
     # Keep all ORCA input and output files with the geometry that spawned them.
     inp_file = xyz_file.parent / f"{label}.inp"
@@ -98,6 +157,10 @@ def create_orca_input(
 
     # PAL block for parallel execution
     lines.append(f"%pal\n  nprocs {ncores}\nend")
+    if temperature is not None:
+        # ORCA 6.1 manual: Frequencies keyword list, %freq Temp.
+        # One T avoids ambiguity in downstream scalar thermochemistry parsing.
+        lines.append(f"%freq\n  Temp {temperature:.15g}\nend")
 
     # Coordinates
     lines.append(f"* xyz {charge} {multiplicity}")
@@ -114,7 +177,12 @@ def create_orca_input(
 
     lines.append("*")
 
-    inp_file.write_text("\n".join(lines))
+    input_text = apply_native_job_settings("\n".join(lines), native_settings)
+    if preserve_existing and inp_file.exists():
+        if inp_file.read_text() != input_text:
+            raise RuntimeError(f"Retained ORCA input differs; refusing to overwrite it: {inp_file}")
+    else:
+        inp_file.write_text(input_text)
 
     return inp_file
 
@@ -134,6 +202,7 @@ def _write_orca_xyzfile_job(
     ncores: int,
     keyword_line: str,
     blocks: list[str] | None = None,
+    native_settings: NativeJobSettings | None = None,
 ) -> Path:
     xyz_file = Path(xyz_file)
     if not xyz_file.is_file():
@@ -143,7 +212,16 @@ def _write_orca_xyzfile_job(
     path = xyz_file.parent / f"{label}.inp"
     lines = [keyword_line, f"%pal\n  nprocs {ncores}\nend", *(blocks or []),
              f"* xyzfile {charge} {multiplicity} {xyz_file.name}"]
-    path.write_text("\n".join(lines) + "\n")
+    text = apply_native_job_settings("\n".join(lines) + "\n", native_settings)
+    if path.exists():
+        if path.read_text() == text:
+            return path
+        if "NEB-TS" in keyword_line.upper():
+            from .orca_input_repair import prepare_neb_preopt_input_repair
+            return prepare_neb_preopt_input_repair(path, text)
+        raise RuntimeError(f"Conflicting retained ORCA input: {path}")
+    with path.open("x") as stream:
+        stream.write(text)
     return path
 
 
@@ -158,6 +236,7 @@ def create_orca_neb_ts_input(
     nimages: int = 8,
     method_keywords: list[str] | None = None,
     preopt_ends: bool = False,
+    prepare_fragments: bool | None = None,
 ) -> Path:
     """Create an ORCA 6 double-ended NEB-TS input.
 
@@ -182,7 +261,9 @@ def create_orca_neb_ts_input(
         keyword_line=_orca_method_line(method_keywords, "TightSCF", "NEB-TS"),
         blocks=[
             f'%neb\n  Product "{product_xyz.name}"\n  NImages {nimages}'
-            + ("\n  PreOptEnds true" if preopt_ends else "")
+            + ("\n  PreOpt true" if preopt_ends else "")
+            + (f"\n  Prepare_Frags {'true' if prepare_fragments else 'false'}"
+               if prepare_fragments is not None else "")
             + "\nend"
         ],
     )
@@ -256,6 +337,49 @@ def create_orca_relaxed_scan_input(
     )
 
 
+def create_orca_guided_scan_input(
+    reactant_xyz: Path,
+    *,
+    coordinates: list[dict],
+    charge: int,
+    multiplicity: int,
+    label: str = "guided-scan",
+    ncores: int = 1,
+    steps: int = 12,
+    method_keywords: list[str] | None = None,
+) -> Path:
+    """Create a bounded simultaneous one- or two-bond relaxed scan."""
+    if steps < 3:
+        raise ValueError("A guided relaxed scan needs at least three points")
+    if not 1 <= len(coordinates) <= 2:
+        raise ValueError("The initial guided scan supports one or two coordinates")
+    scan_lines = ["%geom", "  FullScan true"]
+    for coordinate in coordinates:
+        atom_indices = coordinate.get("atom_indices") or ()
+        if len(atom_indices) != 2:
+            raise ValueError("A guided bond coordinate needs two atom indices")
+        left, right = (int(atom_indices[0]), int(atom_indices[1]))
+        start = float(coordinate["start_distance_angstrom"])
+        end = float(coordinate["end_distance_angstrom"])
+        if min(left, right) < 0 or left == right or min(start, end) <= 0.0:
+            raise ValueError("Invalid guided bond-scan coordinate")
+        scan_lines.append(
+            f"  Scan B {left} {right} = {start:.8f}, {end:.8f}, {int(steps)} end"
+        )
+    if len(coordinates) > 1:
+        scan_lines.append("  Simul_Scan true")
+    scan_lines.append("end")
+    return _write_orca_xyzfile_job(
+        reactant_xyz,
+        label=label,
+        charge=charge,
+        multiplicity=multiplicity,
+        ncores=ncores,
+        keyword_line=_orca_method_line(method_keywords, "TightSCF", "Opt"),
+        blocks=["\n".join(scan_lines)],
+    )
+
+
 def create_orca_constrained_opt_input(
     xyz_file: Path,
     *,
@@ -285,6 +409,59 @@ def create_orca_constrained_opt_input(
     return _write_orca_xyzfile_job(
         xyz_file, label=label, charge=charge, multiplicity=multiplicity, ncores=ncores,
         keyword_line=_orca_method_line(method_keywords, "TightSCF", "Opt"), blocks=[geom],
+    )
+
+
+def create_orca_optimization_recovery_input(
+    xyz_file: Path,
+    *,
+    charge: int,
+    multiplicity: int,
+    label: str = "opt",
+    ncores: int = 1,
+    max_iterations: int = 300,
+    coordinate_system: str = "redundant",
+    calculate_hessian: bool = True,
+    recalculate_hessian_every: int | None = None,
+    trust_radius: float | None = None,
+    method_keywords: list[str] | None = None,
+) -> Path:
+    """Create one explicit, append-only minimum-optimization recovery job.
+
+    The options are deliberately limited to documented ORCA optimizer
+    controls.  They are scientific inputs and therefore belong in the caller's
+    retained recovery contract and cache identity.
+    """
+    if max_iterations < 1:
+        raise ValueError("max_iterations must be positive")
+    normalized_coordinate_system = str(coordinate_system).strip().casefold()
+    if normalized_coordinate_system not in {"redundant", "cartesian"}:
+        raise ValueError("coordinate_system must be redundant or cartesian")
+    if recalculate_hessian_every is not None and recalculate_hessian_every < 1:
+        raise ValueError("recalculate_hessian_every must be positive when supplied")
+    if trust_radius is not None and not 0.0 < float(trust_radius) <= 1.0:
+        raise ValueError("trust_radius must be in (0, 1] when supplied")
+    lines = [
+        "%geom",
+        f"  MaxIter {int(max_iterations)}",
+        f"  CoordSys {normalized_coordinate_system}",
+        "  CartFallback true",
+    ]
+    if calculate_hessian:
+        lines.append("  Calc_Hess true")
+    if recalculate_hessian_every is not None:
+        lines.append(f"  Recalc_Hess {int(recalculate_hessian_every)}")
+    if trust_radius is not None:
+        lines.append(f"  Trust {float(trust_radius):.8f}")
+    lines.append("end")
+    return _write_orca_xyzfile_job(
+        xyz_file,
+        label=label,
+        charge=charge,
+        multiplicity=multiplicity,
+        ncores=ncores,
+        keyword_line=_orca_method_line(method_keywords, "TightSCF", "Opt"),
+        blocks=["\n".join(lines)],
     )
 
 
@@ -371,6 +548,7 @@ def create_rmg_input(
     additional_species: list[dict] | None = None,
     initial_mole_fractions: dict[str, float] | None = None,
     reaction_libraries: list[Path] | None = None,
+    seed_mechanisms: list[Path] | None = None,
     database_reaction_libraries: list[str] | None = None,
     cap_generated_carbon_at_target: bool = True,
     maximum_heavy_atoms: int | None = None,
@@ -378,6 +556,8 @@ def create_rmg_input(
     filter_reactions: bool = False,
     max_objects_per_iteration: int = 1,
     restart_from_seed: Path | None = None,
+    simulator_atol: float = 1e-16,
+    simulator_rtol: float = 1e-8,
 ) -> Path:
     """
     Generate an RMG input.py file for stability testing.
@@ -396,6 +576,8 @@ def create_rmg_input(
         initial_mole_fractions: Explicit reactor composition. Defaults to the
             target species at mole fraction one.
         reaction_libraries: Validated local STORCA-generated library paths.
+        seed_mechanisms: Local mechanisms to place directly in the RMG core.
+            Scientific admission is the caller's responsibility.
         database_reaction_libraries: Named libraries shipped with the selected
             RMG database. Local calculated libraries are listed first so an
             ORCA/Arkane repair can replace a reference-library rate.
@@ -407,14 +589,26 @@ def create_rmg_input(
     input_file = workdir / "input.py"
     additional_species = [dict(species) for species in (additional_species or [])]
     reaction_libraries = reaction_libraries or []
+    seed_mechanisms = list(dict.fromkeys(Path(path).resolve() for path in (seed_mechanisms or [])))
     database_reaction_libraries = list(database_reaction_libraries or [])
     if any(not str(name).strip() for name in database_reaction_libraries):
         raise ValueError("RMG database reaction-library names must be nonempty")
     database_reaction_libraries = list(dict.fromkeys(str(name).strip() for name in database_reaction_libraries))
-    for library in reaction_libraries:
+    for library in [*reaction_libraries, *seed_mechanisms]:
         library = Path(library)
         if not (library / "reactions.py").is_file() or not (library / "dictionary.txt").is_file():
             raise ValueError(f"RMG reaction library must contain reactions.py and dictionary.txt: {library}")
+    if seed_mechanisms:
+        # RMG registers an external library by basename. Distinct paths with
+        # the same registered key can otherwise silently replace a core seed.
+        registered_sources = {}
+        for entry in [*seed_mechanisms, *reaction_libraries, *database_reaction_libraries]:
+            path = Path(entry)
+            source = str(path.resolve()) if path.is_absolute() or path.is_dir() else str(entry)
+            key = Path(source).name if Path(source).is_absolute() else source
+            if key in registered_sources and registered_sources[key] != source:
+                raise ValueError(f"RMG library key collision for seeded mechanism: {key}")
+            registered_sources[key] = source
     mole_fractions = initial_mole_fractions or {label: 1.0}
     # RMG requires every declared species graph to be unique.  A stability
     # target can itself be water/oxygen/a bath-gas component, in which case
@@ -464,6 +658,10 @@ def create_rmg_input(
         raise ValueError("maximum_heavy_atoms must be positive when supplied")
     if maximum_radical_electrons is not None and maximum_radical_electrons < 0:
         raise ValueError("maximum_radical_electrons must be non-negative when supplied")
+    if not math.isfinite(float(simulator_atol)) or float(simulator_atol) <= 0.0:
+        raise ValueError("simulator_atol must be positive and finite")
+    if not math.isfinite(float(simulator_rtol)) or not 0.0 < float(simulator_rtol) < 1.0:
+        raise ValueError("simulator_rtol must be finite and between zero and one")
     if restart_from_seed is not None and not Path(restart_from_seed).is_dir():
         raise ValueError(f"RMG restart seed directory not found: {restart_from_seed}")
     species_blocks = [
@@ -506,14 +704,15 @@ def create_rmg_input(
     )
 
     library_entries = [
-        *(str(Path(library).resolve()) for library in reaction_libraries),
+        *(str(Path(library).resolve()) for library in reaction_libraries
+          if Path(library).resolve() not in seed_mechanisms),
         *database_reaction_libraries,
     ]
 
     content = f"""database(
     thermoLibraries=['primaryThermoLibrary'],
     reactionLibraries={library_entries!r},
-    seedMechanisms=[],
+    seedMechanisms={[str(path) for path in seed_mechanisms]!r},
     kineticsDepositories=['training'],
     kineticsFamilies='default',
     kineticsEstimator='rate rules',
@@ -535,8 +734,8 @@ simpleReactor(
 )
 
 simulator(
-    atol=1e-16,
-    rtol=1e-8,
+    atol={float(simulator_atol)!r},
+    rtol={float(simulator_rtol)!r},
 )
 
 model(

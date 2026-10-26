@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "kind": "storca_scientific_panel_reference_audit",
+  "audit_date": "2026-10-06",
+  "status": "one_rate_only_development_comparator_frozen",
+  "prediction_inputs_allowed": false,
+  "support_claim_allowed": false,
+  "calibration_claim_allowed": false,
+  "prospective_holdout": false,
+  "sources": [
+    {
+      "source_id": "jpl2011-original",
+      "citation": "Sander et al., Chemical Kinetics and Photochemical Data for Use in Atmospheric Studies, Evaluation Number 17, JPL Publication 10-6 (2011).",
+      "url": "https://science.jpl.nasa.gov/documents/1489/JPL_10-6_Final_15June2011_20110620.pdf",
+      "official_index_url": "https://science.jpl.nasa.gov/projects/data-evaluation/",
+      "path": "../../../kinetics/reference_sources/2026-10-03-jpl2011/JPL_10-6.pdf",
+      "sha256": "7f4bf453adcea925b956025125a2cee5180d478a82406c8ae3625f79b20ab4f3",
+      "source_kind": "evaluated_kinetic_recommendation_with_theoretical_input",
+      "visual_audit": {
+        "verified": true,
+        "method": "Independent full-page visual inspection of locally retained original PDF, with official NASA/JPL index identification; remote PDF fetch timed out.",
+        "pdf_pages": [15, 185, 187, 188, 191, 192],
+        "printed_pages": ["1-2", "2-1", "2-3", "2-4", "2-7", "2-8"],
+        "locations": ["Section 1.2 uncertainty semantics", "Section 2.1 limiting-rate definitions and falloff expression", "Sections 2.4-2.6 high-pressure estimates and uncertainty", "Table 2-1 B1 complete row", "Complete Table 2-1 units, air and f(T) footnotes", "Complete B1 source note"]
+      }
+    },
+    {
+      "source_id": "jpl2011-prior-audit",
+      "path": "../../../kinetics/reference_sources/2026-10-03-jpl2011/source-audit.json",
+      "sha256": "c89f336367266055aff118db5ac5303a143217852afbf52adede643f4844f4a9",
+      "source_kind": "unchanged_previous_original_source_audit"
+    },
+    {
+      "source_id": "jpl2011-frozen-specialist-manifest",
+      "path": "../../../kinetics/specialist_rate_manifest.json",
+      "sha256": "8123d303eb0a7bb5b2ada2f188821b3e184a9b90bfca987a7228ce29d359d53c",
+      "source_kind": "unchanged_development_reference_projection"
+    }
+  ],
+  "audited_observation_sets": [
+    {
+      "case_id": "h-o2-association-air-300K-v1",
+      "partition": "development",
+      "source_ids": ["jpl2011-original", "jpl2011-prior-audit", "jpl2011-frozen-specialist-manifest"],
+      "transcription_frozen": true,
+      "quantitative_scoring_ready": true,
+      "observable_scope": "rate_only_high_pressure_limit",
+      "full_finite_pressure_fate_scoring_ready": false,
+      "system": "H + O2 (+M) -> HO2 (+M)",
+      "observable": "Evaluated high-pressure limiting bimolecular association coefficient k_inf(300 K)",
+      "source_location": "Table 2-1, B1, printed page 2-4 (PDF page 188); table footnotes, printed page 2-7 (PDF page 191); complete B1 note, printed page 2-8 (PDF page 192).",
+      "source_conditions": {"phase": "gas", "temperature_K": 300.0, "bath_gas_recommendation": "air", "pressure_regime": "high_pressure_limit", "finite_pressure_bar": null},
+      "observations": [
+        {"point_id": "kinf-300K", "temperature_K": 300.0, "pressure_regime": "high_pressure_limit", "rate": 7.5e-11, "rate_units": "cm^3 molecule^-1 s^-1", "source_temperature_exponent_m": -0.2, "source_formula": "k_inf(T) = k_inf(300 K) * (T/300 K)^(-m)", "source_kind": "evaluated_kinetic_recommendation_with_theoretical_input", "experimental_total_uncertainty": null}
+      ],
+      "reference_uncertainty": {
+        "kind": "jpl2011_evaluated_multiplicative_temperature_envelope",
+        "reference_temperature_K": 298.0,
+        "factor_at_reference_temperature": 1.3,
+        "temperature_parameter_K": 50.0,
+        "formula": "f(T) = f(298 K) * exp(g * abs(1/T - 1/298 K))",
+        "factor_at_300_K": 1.30145495228246,
+        "confidence_probability": null,
+        "statistical_distribution": null,
+        "independence_group": "h-o2-association-jpl2011",
+        "storca_rate_error_calibration": false,
+        "interpretation": "Evaluator-assigned envelope, not a rigorous experimental confidence interval. Section 1.2 uses approximate standard-deviation language; Section 2.6 describes a two-sigma coverage objective. Neither supplies an exact probability model."
+      },
+      "scoring_binding": {
+        "rate": {"value": 7.5e-11, "units": "cm^3 molecule^-1 s^-1", "convention": "high_pressure_limit_bimolecular_H_plus_O2_association_coefficient"},
+        "chemical_system": {"parent": {"name": "Separated H atom + triplet O2", "smiles": "[H].[O][O]", "charge": 0}},
+        "conditions": {
+          "phase": "gas",
+          "environment": "air",
+          "temperature_K": 300.0,
+          "pressure_bar": null,
+          "pressure_regime": "high_pressure_limit",
+          "initial_composition": [{"smiles": "[H]", "charge": 0, "multiplicity": 2}, {"smiles": "[O][O]", "charge": 0, "multiplicity": 3}]
+        },
+        "requested_observables": ["high_pressure_limit_association_rate_coefficient"],
+        "permitted_scoring_observables": ["rate"],
+        "scoring_constraints": {"observable_scope": "rate_only_high_pressure_limit", "applicability_assessment": "unresolved", "maximum_rate_multiplicative_error": null, "experimental_uncertainty": null}
+      },
+      "limitations": [
+        "Historical JPL Evaluation 17 is the frozen development source, not a claim to be the latest evaluation.",
+        "B1 considers measurements and theoretical work and bases its recommendation on the cited Sellevag study; this is not an independent experimentally measured high-pressure point.",
+        "The source uses air for its third-body recommendation and warns of a large water-vapor collider effect; do not substitute a humid-gas or another bath-gas finite-pressure experiment.",
+        "No finite pressure, falloff trajectory, lifetime, branching fraction, elementary mechanism ground truth or complete experimental uncertainty is frozen here.",
+        "No execution budget is granted, no spin-coupled entrance surface is selected, and no applicable capture or master-equation provider has been established by this reference.",
+        "No acceptance threshold, prospective holdout, independent-data count, method support or STORCA uncertainty calibration is admitted."
+      ]
+    }
+  ],
+  "amendment_policy": "Preserve this dated transcription and prior JPL bytes. Any correction requires a new dated record with predecessor hash; never adjust the comparator to a prediction."
+}

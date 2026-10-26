@@ -1,0 +1,59 @@
+{
+  "schema_version": 2,
+  "kind": "storca_discovery_coverage_benchmark_manifest",
+  "status": "curation_required",
+  "primary_metric": "false_reassurance_rate",
+  "required_case_fields": [
+    "case_id",
+    "partition",
+    "stratum",
+    "chemical_system",
+    "environment",
+    "conditions",
+    "requested_observable",
+    "reference_pathways",
+    "reference_provenance",
+    "influential_reference_path_missing",
+    "assessment",
+    "baseline_assessments",
+    "compute_accounting"
+  ],
+  "required_case_strata": [
+    "rmg_success",
+    "rmg_blind_spot_recovered_by_independent_discovery",
+    "shared_discovery_blind_spot",
+    "competing_pathways",
+    "radical_chemistry",
+    "graph_false_positive",
+    "outside_current_method_applicability"
+  ],
+  "required_partitions": [
+    "development",
+    "holdout"
+  ],
+  "required_baselines": [
+    "rmg_only",
+    "pre_stab008_storca",
+    "stab008_coverage_policy",
+    "multi_discovery_storca"
+  ],
+  "reported_metrics": [
+    "false_reassurance_rate",
+    "correct_abstention_rate",
+    "false_abstention_rate",
+    "correct_support_rate",
+    "per_stratum_rates",
+    "high_level_calculation_count",
+    "wall_clock_cost"
+  ],
+  "calibration_gate": {
+    "maximum_holdout_false_reassurance_count": 0,
+    "minimum_case_count_per_required_stratum": "must_be_preregistered_before_curation",
+    "false_abstention_threshold": "must_be_preregistered_before_holdout_evaluation",
+    "cost_threshold": "must_be_preregistered_before_holdout_evaluation",
+    "holdout_locked_before_policy_tuning": true,
+    "empty_manifest_passes": false
+  },
+  "cases": [],
+  "interpretation": "This file preregisters the benchmark schema, baselines, and primary safety metric. The empty case list deliberately fails the calibration gate. No scientific calibration claim is permitted until provenance-backed development and locked holdout cases plus numerical abstention/cost thresholds are curated before evaluation."
+}

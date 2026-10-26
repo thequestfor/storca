@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "kind": "storca_source_bound_pressure_applicability_audit",
+  "recorded_date": "2026-10-08",
+  "case_id": "cyclobutene-cooper-walters1958-423K",
+  "status": "primary_visual_access_unresolved_no_quantitative_hpl_bound",
+  "frozen_inputs": [
+    {
+      "path": "benchmarks/stability/p1_cyclobutene_development.json",
+      "sha256": "e3bb76d6c3588f91b2d252c40a2a43b88878dce3710d26148114e2b592ae2e4a"
+    },
+    {
+      "path": "benchmarks/stability/reference_sources/2026-10-03-p1-access/source-access-review.json",
+      "sha256": "65ff9f6ce8062c6d21261fbc5c1a0901547b659cfe39bf9fa0f83b1ac86f8ff3"
+    },
+    {
+      "path": "benchmarks/stability/reference_sources/2026-10-03-p1-access/table-audit-readiness-001.json",
+      "sha256": "282e5f667a55aa944a7f7cdcb9c35366f032ac3a24d26d7f1025c147858108fd"
+    }
+  ],
+  "source": {
+    "doi": "10.1021/ja01549a025",
+    "citation": "Cooper, W.; Walters, W. D. The Thermal Isomerization of Cyclobutene. J. Am. Chem. Soc. 1958, 80, 4220-4224.",
+    "publisher_url": "https://pubs.acs.org/doi/10.1021/ja01549a025",
+    "registered_primary_content_mirror": "https://electronicsandbooks.com/edt/manual/Magazine/J/Journal%20of%20the%20American%20Chemical%20Society%20US/1958%20%20%28vol%20080%29/16%20%20%284121-4438%29/4220-4224.pdf",
+    "original_pdf_retained": false,
+    "original_pdf_sha256": null,
+    "visual_page_verified": false
+  },
+  "access_observations": [
+    {
+      "method": "web direct publisher page open",
+      "result": "HTTP 403 Forbidden"
+    },
+    {
+      "method": "web direct registered PDF mirror open",
+      "result": "Timeout fetching; no PDF or original page image returned"
+    },
+    {
+      "method": "bounded focused search of this article's indexed content",
+      "result": "Primary-content index reconfirms abstract pressure/temperature claims; original visual table remains unavailable"
+    }
+  ],
+  "indexed_primary_content_not_visual_evidence": {
+    "access_date": "2026-10-08",
+    "local_pressure_series_temperature_C": 150,
+    "reported_pressure_invariance_range_mmHg": [5, 50],
+    "individual_pressure_rate_pairs_visually_audited": false,
+    "temperature_series_C": [130, 175],
+    "temperature_series_initial_pressure_mmHg": [8, 14],
+    "temperature_control_uncertainty_description": "Thermocouple/zone estimate of a few tenths of a degree; not total kinetic uncertainty or a stated confidence interval",
+    "ocr_integrity_warning": "The indexed first page reports 4290 rather than 4220 and an activation-energy exponent inconsistent with its own prose. No equation or fit is admitted from this OCR.",
+    "experimental_total_uncertainty": null,
+    "confidence_level": null
+  },
+  "pressure_applicability_decision": {
+    "requested_temperature_K": 423.15,
+    "requested_pressure_bar": 0.0666611842,
+    "registered_initial_pressure_mmHg": 50.0,
+    "qualitative_local_consistency": "provisional_indexed_primary_content_only",
+    "quantitative_high_pressure_limit_error_bound": null,
+    "confidence_level": null,
+    "canonical_rate_pressure_error_bounded": false,
+    "full_retained_network_pressure_error_bounded": false,
+    "arbitrary_pressure_extension_allowed": false,
+    "reason": "A reported local plateau without source-audited rate-versus-pressure data, systematic uncertainties, and a justified limiting-rate/falloff inference does not bound k(T,p)/k_infinity(T). It also does not validate the separate triplet channels."
+  },
+  "required_next_evidence": [
+    "Lawfully accessible original article, with complete rate table, footnotes and surrounding pressure/uncertainty passages retained and visually audited",
+    "Explicit local finite-pressure applicability analysis with stated uncertainty and limiting-rate assumptions; obtain further evidence only if this source cannot support the requested bound",
+    "Separate rate-pressure applicability for each retained influential channel, including the electronically unresolved branches"
+  ],
+  "reference_values_changed": false,
+  "rate_corrections_made": false,
+  "calibration_admitted": false,
+  "scientific_gate_achieved": false,
+  "support_claim_allowed": false,
+  "lifetime_claim_allowed": false,
+  "conclusive_observable_allowed": false,
+  "chemistry_jobs_executed": 0,
+  "software_installed": false,
+  "scope": "One-source audit and explicit access limitation; no broad literature search, new rate fit, invented confidence bound, or preregistration change"
+}

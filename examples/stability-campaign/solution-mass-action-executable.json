@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "kind": "storca_stability_campaign_request",
+  "chemical_system": {
+    "target_component_id": "target",
+    "components": [
+      {
+        "component_id": "target",
+        "smiles": "C1CC1",
+        "charge": 0,
+        "multiplicity": 1,
+        "role": "target"
+      },
+      {
+        "component_id": "partner",
+        "smiles": "CC=C",
+        "charge": 0,
+        "multiplicity": 1,
+        "role": "reactant"
+      }
+    ],
+    "material_context": {
+      "description": "synthetic ideal-solution mass-action analytical regression"
+    },
+    "user_declared_applicability_flags": {}
+  },
+  "observables": [
+    {
+      "observable_id": "target-t95",
+      "kind": "t95",
+      "target_component_id": "target",
+      "retention_fraction": 0.95,
+      "time_horizon_seconds": 20.0
+    }
+  ],
+  "lane_requests": [
+    {
+      "lane_request_id": "water-smd-mass-action-298K",
+      "lane_id": "solution-neutral-implicit-mass-action-v1",
+      "environment": {
+        "environment_kind": "homogeneous_solution",
+        "model_name": "implicit_solvent_constant_volume_mass_action_v1",
+        "parameters": {
+          "activity_model": "ideal_molar_concentration",
+          "electronic_structure_profile": "b3lyp-def2-svp",
+          "light_condition": "dark",
+          "phase_model": "homogeneous implicit solution",
+          "retention_fraction": 0.95,
+          "solvent": "water",
+          "solvent_model": "SMD",
+          "standard_state_mol_L": 1.0,
+          "target_duration_seconds": 20.0,
+          "temperature_K": 298.15,
+          "volume_L": 1.0
+        }
+      },
+      "observable_ids": ["target-t95"],
+      "method_profile": "b3lyp-def2-svp",
+      "compute_budget": {
+        "profile_points": 180,
+        "relative_tolerance": 1e-7,
+        "absolute_tolerance": 1e-12,
+        "maximum_steps": 200000
+      },
+      "evidence_inputs": [
+        {
+          "input_id": "water-smd-mass-action-environment",
+          "input_kind": "solution_environment",
+          "content_sha256": "sha256:a530b11a022982da42f50e391babc2ab97a914667b1d80df41eb1a62061e127a",
+          "path": "evidence/water-smd-298K-mass-action-environment.json",
+          "claim_id": "claim:fixture:water-smd-mass-action-environment"
+        },
+        {
+          "input_id": "cyclopropane-propene-mass-action-network",
+          "input_kind": "verified_solution_mass_action_network",
+          "content_sha256": "sha256:1acdc6ffc69a2d692b3d814658d1143c32d0db5f9fcd1436f1066385ca1ff399",
+          "path": "evidence/cyclopropane-propene-verified-mass-action-network.json",
+          "claim_id": "claim:fixture:cyclopropane-propene-mass-action-coverage"
+        }
+      ],
+      "user_assumptions": {}
+    }
+  ],
+  "global_compute_budget": {"maximum_solution_lanes": 1},
+  "campaign_policy": {
+    "mode": "environment_map",
+    "execution_policy": "explicit_execute",
+    "continue_after_blocked_lane": true
+  },
+  "metadata": {
+    "name": "synthetic mass-action solution execution",
+    "warning": "Synthetic analytical regression evidence; not experimental chemistry."
+  }
+}

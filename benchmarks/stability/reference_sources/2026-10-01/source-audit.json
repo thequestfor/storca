@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "kind": "storca_scientific_panel_reference_audit",
+  "audit_date": "2026-10-02",
+  "status": "source_observations_frozen_not_prediction_preregistration",
+  "prediction_inputs_allowed": false,
+  "support_claim_allowed": false,
+  "calibration_claim_allowed": false,
+  "prospective_holdout": false,
+  "sources": [
+    {
+      "source_id": "hornung2017-main",
+      "citation": "Hornung et al., Beilstein J. Org. Chem. 2017, 13, 120-126.",
+      "doi": "10.3762/bjoc.13.15",
+      "url": "https://www.beilstein-journals.org/bjoc/content/pdf/1860-5397-13-15.pdf",
+      "path": "hornung-2017.pdf",
+      "sha256": "b09596a169a354daea23ce1d0b1bf39795aaa9aeaa71038c488a80a5b2d218fe",
+      "source_kind": "primary_experiment",
+      "license": "CC BY 4.0, subject to publisher terms",
+      "visual_audit": {"verified": true, "printed_pages": [122, 125], "locations": ["Table 2 including footnotes", "Materials and analysis", "Batch Diels-Alder reaction"]}
+    },
+    {
+      "source_id": "hornung2017-si",
+      "citation": "Supporting Information to Hornung et al., DOI 10.3762/bjoc.13.15.",
+      "url": "https://www.beilstein-journals.org/bjoc/content/supplementary/1860-5397-13-15-S1.pdf",
+      "path": "hornung-2017-si.pdf",
+      "sha256": "08d5869715af80c2f58863c3ead013ecb4197ad23548e0f7928343eb575505d4",
+      "source_kind": "primary_experiment_supporting_information",
+      "visual_audit": {"verified": true, "printed_pages": ["S3", "S5"], "locations": ["Equations S1-S3", "Table S1 including unit multiplier"]}
+    },
+    {
+      "source_id": "lin2015-main",
+      "citation": "Lin et al., Nature Communications 2015, 6, 7012.",
+      "doi": "10.1038/ncomms8012",
+      "url": "https://www.nature.com/articles/ncomms8012.pdf",
+      "path": "lin-2015.pdf",
+      "sha256": "6e750522b96dce8877ccdc50ddad7a53d93a67b6cf0a4b9a1b5c6648fc0b636c",
+      "source_kind": "primary_experiment",
+      "visual_audit": {"verified": true, "printed_pages": [5], "locations": ["Figure 4 caption", "Discussion below Figures 3 and 4"]}
+    }
+  ],
+  "audited_observation_sets": [
+    {
+      "case_id": "myrcene-acrylic-acid-solution-hornung2017",
+      "partition": "development",
+      "source_ids": ["hornung2017-main", "hornung2017-si"],
+      "transcription_frozen": true,
+      "quantitative_scoring_ready": false,
+      "system": "beta-myrcene + acrylic acid",
+      "observable": "reported apparent second-order kinetic-fit coefficient",
+      "rate_units": "L mol^-1 s^-1",
+      "rate_convention": "Slope of 1/[myrcene] versus time under the authors' near-equimolar approximation [A] approximately [B]; proposed extent law r=k[A][B]. Not a directly measured single-channel elementary rate.",
+      "source_rate_priority": "Retain SI Table S1 precision and main Table 2 rounding independently; no averaging or fitted Arrhenius extrapolation.",
+      "source_conditions": {"phase": "solution", "reactor": "sealed batch microwave vial", "myrcene_stock_purity_fraction": 0.9, "reaction_pressure_bar": null, "light_condition": "not explicitly specified", "sampling_note": "Heating stopped for sampling at 20, 40, 60 and 120 min.", "acrylic_acid_concentrations": "Derived from listed initial myrcene concentration divided by source ratio R; no concentration-density conversion inferred."},
+      "observations": [
+        {"row": "2.1", "solvent": "ethyl acetate", "temperature_C": 120, "temperature_K": 393.15, "initial_myrcene_mol_L": 2.8, "initial_myrcene_to_acrylic_acid_ratio": 0.9, "main_table_scaled_rate": 0.53, "main_table_multiplier": 0.001, "si_table_scaled_rate": 528, "si_table_multiplier": 0.000001, "rate": 0.000528, "experimental_total_uncertainty": null},
+        {"row": "2.2", "solvent": "ethyl acetate", "temperature_C": 140, "temperature_K": 413.15, "initial_myrcene_mol_L": 2.8, "initial_myrcene_to_acrylic_acid_ratio": 0.9, "main_table_scaled_rate": 3.44, "main_table_multiplier": 0.001, "si_table_scaled_rate": 3440, "si_table_multiplier": 0.000001, "rate": 0.00344, "experimental_total_uncertainty": null},
+        {"row": "2.3", "solvent": "toluene", "temperature_C": 100, "temperature_K": 373.15, "initial_myrcene_mol_L": 2.8, "initial_myrcene_to_acrylic_acid_ratio": 0.9, "main_table_scaled_rate": 0.27, "main_table_multiplier": 0.001, "si_table_scaled_rate": 267, "si_table_multiplier": 0.000001, "rate": 0.000267, "experimental_total_uncertainty": null},
+        {"row": "2.4", "solvent": "toluene", "temperature_C": 120, "temperature_K": 393.15, "initial_myrcene_mol_L": 2.8, "initial_myrcene_to_acrylic_acid_ratio": 0.9, "main_table_scaled_rate": 1.14, "main_table_multiplier": 0.001, "si_table_scaled_rate": 1140, "si_table_multiplier": 0.000001, "rate": 0.00114, "experimental_total_uncertainty": null},
+        {"row": "2.5", "solvent": "toluene", "temperature_C": 140, "temperature_K": 413.15, "initial_myrcene_mol_L": 2.8, "initial_myrcene_to_acrylic_acid_ratio": 0.9, "main_table_scaled_rate": 4.75, "main_table_multiplier": 0.001, "si_table_scaled_rate": 4750, "si_table_multiplier": 0.000001, "rate": 0.00475, "experimental_total_uncertainty": null},
+        {"row": "2.6", "solvent": "toluene", "temperature_C": 160, "temperature_K": 433.15, "initial_myrcene_mol_L": 2.9, "initial_myrcene_to_acrylic_acid_ratio": 1.1, "main_table_scaled_rate": 27.05, "main_table_multiplier": 0.001, "si_table_scaled_rate": 27050, "si_table_multiplier": 0.000001, "rate": 0.02705, "experimental_total_uncertainty": null}
+      ],
+      "readiness_blockers": [
+        "No total experimental uncertainty or batch pressure is reported.",
+        "Assess concentrated-solution activities, neutral acid association and unspecified stock impurities; do not equate this with dilute ideal solution.",
+        "Match the approximate fitted rate convention before comparison; do not infer lifetimes or branching from it.",
+        "Freeze execution conditions, thermal/microwave assumptions, budgets and thresholds before predictions."
+      ]
+    },
+    {
+      "case_id": "ch3choo-conformer-reactivity-lin2015",
+      "partition": "development",
+      "source_ids": ["lin2015-main"],
+      "transcription_frozen": true,
+      "quantitative_scoring_ready": false,
+      "reference_type": "qualitative conformer-specific reactivity challenge",
+      "quantitative_rate_reference_available": false,
+      "absolute_rate_unavailability_reason": "Authors cannot determine absolute CH3CHOO concentrations because probe and photolysis volumes differ; accurate rate coefficients are unavailable.",
+      "source_conditions": {"phase": "gas", "precursor_bath_molar_ratio": {"CH3CHI2": 1, "N2": 21, "O2": 129}, "source_pressure_Torr": 90, "added_NO_partial_pressure_Torr_approximate": 3.0, "added_NO2_partial_pressure_Torr_approximate": 0.18, "photolysis_wavelength_nm": 248, "observation_windows_microseconds": [[0, 5], [5, 10], [15, 20]], "temperature_K": null},
+      "allowed_use": "Challenge conformer lumping and equilibrium assumptions; observe anti/syn removal ordering only. No fitted rate, calibrated lifetime, pure unimolecular comparator or universal 30-fold ratio.",
+      "readiness_blockers": ["An independent quantitative source is required for an absolute-rate benchmark.", "Do not infer an experimental rate from total transient decay or an illustrative spectral ordering."]
+    }
+  ],
+  "unknown_is_not_zero": ["experimental_total_uncertainty", "unreported pressure", "unspecified temperature", "activity and impurity effects"],
+  "amendment_policy": "Preserve this source observation record. Any corrected transcription requires a new dated record with predecessor hash; never silently adjust to prediction results."
+}

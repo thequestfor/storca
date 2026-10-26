@@ -1,0 +1,57 @@
+{
+  "coverage_claim_id": "claim:fixture:cyclopropane-propene-mass-action-coverage",
+  "coverage_status": "verified_complete_within_declared_mass_action_scope",
+  "discovery_sources": ["synthetic_analytical_regression_mechanism"],
+  "kind": "verified_implicit_solution_mass_action_network",
+  "reactions": [
+    {
+      "applicability_flags": {},
+      "diffusion_limit_L_mol_s": 10000000000.0,
+      "diffusion_limit_source": "synthetic Smoluchowski ceiling regression evidence",
+      "evidence_hashes": ["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+      "lower_rate_multiplier": 0.8,
+      "products": {"adduct": 1},
+      "rate_claim_id": "claim:fixture:association-rate",
+      "rate_constant": 1.0,
+      "rate_theory": "experimental_solution_rate",
+      "rate_units": "L mol^-1 s^-1",
+      "reactants": {"partner": 1, "target": 1},
+      "reaction_id": "association",
+      "solvent": "water",
+      "solvent_model": "SMD",
+      "source": "synthetic analytical second-order trace",
+      "standard_state_mol_L": 1.0,
+      "temperature_K": 298.15,
+      "uncertainty_components": ["rate_measurement_or_model", "diffusion_ceiling"],
+      "uncertainty_source": "synthetic calibrated interval",
+      "upper_rate_multiplier": 1.2,
+      "verification_status": "verified_experimental_solution_rate"
+    }
+  ],
+  "schema_version": 1,
+  "species": [
+    {
+      "charge": 0,
+      "element_counts": {"C": 3, "H": 6},
+      "initial_concentration_mol_L": 0.1,
+      "smiles": "C1CC1",
+      "species_id": "target"
+    },
+    {
+      "charge": 0,
+      "element_counts": {"C": 3, "H": 6},
+      "initial_concentration_mol_L": 0.1,
+      "smiles": "CC=C",
+      "species_id": "partner"
+    },
+    {
+      "charge": 0,
+      "element_counts": {"C": 6, "H": 12},
+      "initial_concentration_mol_L": 0.0,
+      "smiles": "C1CCCCC1",
+      "species_id": "adduct"
+    }
+  ],
+  "target_species_id": "target",
+  "unresolved_candidate_ids": []
+}

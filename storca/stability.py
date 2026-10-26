@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import re
 from copy import deepcopy
+from typing import Any, Mapping
 
 from src.inputgen import create_rmg_input
 from src.orca_runner import run_rmg_supervised
@@ -17,6 +18,7 @@ from .reachability import assess_kinetic_relevance, enrich_candidate_route
 from .rmg_evidence import parse_annotated_reaction_provenance, parse_final_solver_profile, parse_species_dictionary
 from .rmg_execution import (
     assess_rmg_execution,
+    isothermal_propagation_blockers,
     merge_collision_rate_validation,
     parse_collision_rate_violators,
     requested_time_coverage,
@@ -34,14 +36,14 @@ STABILITY_SCENARIOS = {
             "thermal behavior while retaining a defined collision partner. It is not a literal vacuum, condensed phase, "
             "surface, container, or excited-state model."
         ),
-        "additional_species": [{"label": "nitrogen", "smiles": "N#N", "reactive": False}],
+        "additional_species": [{"label": "nitrogen", "smiles": "N#N", "charge": 0, "multiplicity": 1, "reactive": False}],
         "initial_mole_fractions": {"stability": 0.01, "nitrogen": 0.99},
     },
     "dry-inert-gas-screen": {
         "phase": "homogeneous gas-phase surrogate",
         "atmosphere": "dry nitrogen",
         "model_applicability": "A dilute target molecule in an inert nitrogen bath; not a condensed-phase, humidity, light-exposure, or container-compatibility model.",
-        "additional_species": [{"label": "nitrogen", "smiles": "N#N", "reactive": False}],
+        "additional_species": [{"label": "nitrogen", "smiles": "N#N", "charge": 0, "multiplicity": 1, "reactive": False}],
         "initial_mole_fractions": {"stability": 0.01, "nitrogen": 0.99},
     },
     "ambient-air-gas-screen": {
@@ -49,8 +51,8 @@ STABILITY_SCENARIOS = {
         "atmosphere": "dry air (oxygen/nitrogen)",
         "model_applicability": "A dilute target molecule in dry air. This does not model liquid, solid, dissolved, humid, illuminated, or surface-contact storage.",
         "additional_species": [
-            {"label": "oxygen", "smiles": "[O][O]", "reactive": True},
-            {"label": "nitrogen", "smiles": "N#N", "reactive": False},
+            {"label": "oxygen", "smiles": "[O][O]", "charge": 0, "multiplicity": 3, "reactive": True},
+            {"label": "nitrogen", "smiles": "N#N", "charge": 0, "multiplicity": 1, "reactive": False},
         ],
         "initial_mole_fractions": {"stability": 0.01, "oxygen": 0.2079, "nitrogen": 0.7821},
     },
@@ -59,9 +61,9 @@ STABILITY_SCENARIOS = {
         "atmosphere": "humid air (water vapour/oxygen/nitrogen)",
         "model_applicability": "A dilute target in homogeneous humid gas. This does not model droplets, dissolved ions, surfaces, or container compatibility.",
         "additional_species": [
-            {"label": "water", "smiles": "O", "reactive": True},
-            {"label": "oxygen", "smiles": "[O][O]", "reactive": True},
-            {"label": "nitrogen", "smiles": "N#N", "reactive": False},
+            {"label": "water", "smiles": "O", "charge": 0, "multiplicity": 1, "reactive": True},
+            {"label": "oxygen", "smiles": "[O][O]", "charge": 0, "multiplicity": 3, "reactive": True},
+            {"label": "nitrogen", "smiles": "N#N", "charge": 0, "multiplicity": 1, "reactive": False},
         ],
         # This named standalone scenario is deliberately dry by default.  The
         # ladder supplies a humidity-derived composition for humid air.
@@ -234,6 +236,7 @@ def collect_orca_evidence(
     multiplicity: int = 1,
     ncores: int = 1,
     method_profile: dict | None = None,
+    timeout_seconds: float | None = 14400.0,
 ) -> dict:
     """Run ORCA optimization/frequencies and retain local-minimum evidence.
 
@@ -256,6 +259,7 @@ def collect_orca_evidence(
         "multiplicity": multiplicity,
         "ncores": ncores,
         "method_profile": method_profile,
+        "timeout_seconds_per_job": timeout_seconds,
         "artifacts": artifacts,
         "interpretation": "An ORCA harmonic frequency calculation tests for a local minimum; it does not establish kinetic persistence.",
     }
@@ -272,7 +276,28 @@ def collect_orca_evidence(
             multiplicity=multiplicity,
             ncores=ncores,
             method_keywords=(method_profile or {}).get("orca_keywords"),
+            timeout_seconds=timeout_seconds,
         )
+        if not result["frequency_check"].get("IsMinimum"):
+            # A symmetry-preserving conformer can converge to a higher-order
+            # stationary point even though a nearby minimum is available.  Use
+            # the same retained Hessian-following recovery as route endpoints
+            # before declaring the parent local-minimum check unresolved.
+            from .reaction_path import _recover_endpoint_minimum
+
+            result = _recover_endpoint_minimum(
+                result, run_dir, charge=charge, multiplicity=multiplicity,
+                ncores=ncores,
+                method_keywords=(method_profile or {}).get("orca_keywords"),
+                timeout_seconds=timeout_seconds,
+            )
+        artifacts.update(
+            optimization_output=str(result["optimization"]["out"]),
+            optimized_xyz=str(result["optimized_xyz"]),
+            frequency_output=str(result["frequency"]["out"]),
+        )
+        artifacts["optimization_input"] = str(Path(artifacts["optimization_output"]).with_suffix(".inp"))
+        artifacts["frequency_input"] = str(Path(artifacts["frequency_output"]).with_suffix(".inp"))
         optimized_elements = _xyz_element_counts(result["optimized_xyz"])
         frequency_check = result["frequency_check"]
         minimum_modes = max(1, 3 * sum(input_elements.values()) - 6)
@@ -291,6 +316,8 @@ def collect_orca_evidence(
             element_inventory_retained=input_elements == optimized_elements,
             frequency_mode_coverage=frequency_mode_coverage,
         )
+        if result.get("minimum_recovery"):
+            evidence["minimum_recovery"] = result["minimum_recovery"]
         if input_elements != optimized_elements:
             evidence["status"] = "incomplete"
             evidence["interpretation"] = "ORCA completed, but optimized XYZ does not retain the input element inventory. Review artifacts before using this evidence."
@@ -368,6 +395,8 @@ def _collect_rmg_evidence_once(
     rmg_hard_timeout_seconds: float | None = None,
     rmg_heartbeat_timeout_seconds: float | None = None,
     rmg_start_method: str = "auto",
+    rmg_simulator_atol: float = 1e-16,
+    rmg_simulator_rtol: float = 1e-8,
     requested_phase: str | None = None,
     scenario: dict | None = None,
     conditions: ConditionSpec | None = None,
@@ -393,8 +422,22 @@ def _collect_rmg_evidence_once(
     from .generated_kinetics import validate_generated_library
     reaction_libraries = reaction_libraries or []
     database_reaction_libraries = list(dict.fromkeys(database_reaction_libraries or []))
-    library_manifests = [validate_generated_library(path, temperature_K=temperature, pressure_bar=pressure)
+    library_manifests = [validate_generated_library(path, temperature_K=temperature, pressure_bar=pressure,
+                                                   condition_contract=conditions.as_dict() if conditions else None)
                          for path in reaction_libraries]
+    # A verified repair must actually participate in propagation. Ordinary
+    # reaction libraries enter only RMG's edge and may never reach the core.
+    # Retain reference libraries as discovery evidence, while placing admitted
+    # replacements in the core through RMG's native seed-mechanism interface.
+    repair_seed_libraries = [
+        Path(path) for path, manifest in zip(reaction_libraries, library_manifests)
+        if manifest.get("purpose") == "kinetic_repair" or manifest.get("replaces_reaction")
+    ]
+    from .reaction_correspondence import build_replacement_identity_requests, retain_replacement_identity
+    replacement_identity_requests = build_replacement_identity_requests(
+        repair_seed_libraries, temperature_K=temperature, pressure_bar=pressure,
+        condition_contract=conditions.as_dict() if conditions else None,
+    )
     reference_manifest = None
     reference_subset_libraries: list[str] = []
     if database_reaction_libraries:
@@ -422,6 +465,7 @@ def _collect_rmg_evidence_once(
         additional_species=(scenario or {}).get("additional_species"),
         initial_mole_fractions=(scenario or {}).get("initial_mole_fractions"),
         reaction_libraries=reaction_libraries,
+        seed_mechanisms=repair_seed_libraries,
         database_reaction_libraries=reference_subset_libraries,
         # Association is retained up to the explicit one-collision budget.
         cap_generated_carbon_at_target=False,
@@ -430,6 +474,8 @@ def _collect_rmg_evidence_once(
         filter_reactions=reaction_space_budget["filter_reactions"],
         max_objects_per_iteration=rmg_max_objects_per_iteration,
         restart_from_seed=restart_from_seed,
+        simulator_atol=rmg_simulator_atol,
+        simulator_rtol=rmg_simulator_rtol,
     )
     artifacts = {
         "input": str(input_file), "stdout": str(rmg_dir / "rmg.stdout.log"),
@@ -452,6 +498,10 @@ def _collect_rmg_evidence_once(
         "resource_limits": {"walltime": rmg_walltime, "max_processes": rmg_max_processes,
                             "max_iterations": rmg_max_iterations, "max_edge_species": rmg_max_edge_species},
         "model_enlargement": {"max_objects_per_iteration": rmg_max_objects_per_iteration},
+        "solver_policy": {
+            "simulator_atol": float(rmg_simulator_atol),
+            "simulator_rtol": float(rmg_simulator_rtol),
+        },
         "generated_species_constraints": {
             "maximum_carbon_atoms": None,
             **reaction_space_budget,
@@ -462,13 +512,22 @@ def _collect_rmg_evidence_once(
             else "bounded_direct_reactive_network_with_declared_environment"
         ),
         "candidate_routes": [], "artifacts": artifacts,
+        "parser_assessment": {"status": "not_started"},
         "generated_kinetics_libraries": library_manifests,
+        "replacement_identity_required": bool(replacement_identity_requests),
+        "verified_repair_insertion": {
+            "policy_id": "verified-repair-native-rmg-core-seed-v1",
+            "seed_libraries": [str(path.resolve()) for path in repair_seed_libraries],
+            "post_propagation_rate_matching_required": True,
+            "uncertainty_validation_bypassed": False,
+        },
         "reference_kinetics_libraries": {
             "requested_source_libraries": database_reaction_libraries,
             "direct_subset": reference_manifest,
         },
         "interpretation": "RMG is a bounded homogeneous simple-reactor model screen. Missing routes do not establish persistence.",
     }
+    stage = "rmg_execution"
     try:
         execution = run_rmg_supervised(input_file, rmg_env=rmg_env, rmg_command=rmg_command,
                                        walltime=rmg_walltime, max_processes=rmg_max_processes,
@@ -498,14 +557,20 @@ def _collect_rmg_evidence_once(
             evidence["failure_reason"] = process_failure_reason
         chemkin_file = Path(artifacts["chemkin"])
         if not chemkin_file.is_file():
+            evidence["parser_assessment"] = {"status": "unavailable", "reason": "chemkin_output_missing"}
             evidence.update(status="failed" if process_failure_reason else "incomplete",
                             interpretation="RMG exited without annotated Chemkin output; search coverage is incomplete.")
             return evidence
+        stage = "chemkin_parsing"
         parsed = parse_chemkin_annotated(chemkin_file, barrier_threshold=barrier_threshold, label="stability")
         raw_routes = [
             {**route, "screening_threshold_kcal_mol": barrier_threshold}
             for route in parsed["candidate_routes"]
         ]
+        # Preserve successful parsing even if the subsequent native inspection
+        # fails. Raw equations are diagnostic, not atom-resolved ORCA routes.
+        evidence["parsed_candidate_routes"] = deepcopy(raw_routes)
+        evidence["parser_assessment"] = {"status": "completed", "candidate_count": len(raw_routes)}
         # A small reference subset is deliberately not forced into RMG's
         # kinetic core. Retain its direct, atom-resolved directions as
         # candidates for ORCA verification even when the bounded solver does
@@ -525,20 +590,26 @@ def _collect_rmg_evidence_once(
                     "screening_threshold_kcal_mol": barrier_threshold,
                     **classify_chemkin_route(equation, label="stability"),
                 })
+        stage = "species_dictionary_parsing"
         dictionary_file = Path(artifacts["species_dictionary"])
         species_dictionary = parse_species_dictionary(dictionary_file) if dictionary_file.is_file() else {}
+        evidence["species_dictionary"] = species_dictionary
         if rmg_env:
             # Validate the retained mechanism in the same RMG/Cantera runtime
             # which generated it.  This is deliberately isolated from the
             # app's Python 3.12 environment.
             from .rmg_bridge_client import run_rmg_bridge
-            evidence["mechanism_inspection"] = run_rmg_bridge(
+            stage = "mechanism_inspection"
+            inspection = run_rmg_bridge(
                 {"operation": "inspect", "chemkin": str(chemkin_file),
                  "dictionary": str(dictionary_file) if dictionary_file.is_file() else None,
                  "transport": artifacts["transport"] if Path(artifacts["transport"]).is_file() else None,
-                 "temperature_K": temperature, "pressure_bar": pressure},
+                 "temperature_K": temperature, "pressure_bar": pressure,
+                 "replacement_libraries": replacement_identity_requests},
                 rmg_env=rmg_env,
             )
+            evidence["mechanism_inspection"] = retain_replacement_identity(inspection, rmg_dir)
+        stage = "route_enrichment"
         provenance = parse_annotated_reaction_provenance(chemkin_file)
         profile = parse_final_solver_profile(Path(artifacts["solver"]), "stability")
         evidence["time_coverage"] = requested_time_coverage(
@@ -624,6 +695,7 @@ def _collect_rmg_evidence_once(
         relevance_profile = profile
         if rmg_env and execution_assessment["status"] == "completed":
             from .rmg_bridge_client import run_rmg_bridge
+            stage = "independent_propagation"
             propagation = run_rmg_bridge(
                 {
                     "operation": "propagate", "chemkin": str(chemkin_file),
@@ -648,6 +720,7 @@ def _collect_rmg_evidence_once(
                 ],
                 "end_time_seconds": propagation["coverage"]["simulated_seconds"],
             }
+        stage = "kinetic_relevance_assessment"
         evidence["kinetic_relevance"] = (
             assess_kinetic_relevance(evidence["candidate_routes"], relevance_profile, conditions)
             if conditions else None
@@ -683,6 +756,9 @@ def _collect_rmg_evidence_once(
         if stderr is not None:
             Path(artifacts["stderr"]).write_text(stderr)
         evidence["failure_reason"] = str(error)
+        evidence["failure_stage"] = stage
+        if stage == "chemkin_parsing":
+            evidence["parser_assessment"] = {"status": "failed", "failure_reason": str(error)}
     return evidence
 
 
@@ -702,7 +778,12 @@ def collect_rmg_evidence(
     controller dossier that makes budget exhaustion and attempt-to-attempt
     changes explicit to the assessment layer.
     """
-    from .rmg_controller import convergence_comparison, restart_is_justified, staged_budgets
+    from .rmg_controller import (
+        convergence_comparison, restart_is_justified, solver_policy_for_attempt,
+        staged_budgets,
+    )
+    from .rmg_attempts import retain_rmg_attempt
+    from .rmg_partial_candidates import build_retained_partial_routes
 
     if rmg_retry_attempts < 1:
         raise ValueError("rmg_retry_attempts must be at least one")
@@ -714,22 +795,64 @@ def collect_rmg_evidence(
     }
     budgets = staged_budgets(resources, rmg_retry_attempts)
     attempts: list[dict] = []
+    attempt_references: list[dict] = []
+    conditions = kwargs.get("conditions")
+    condition_contract = conditions.as_dict() if conditions is not None else None
     restart_seed: Path | None = None
+    daspk_recovery_number = 0
     attempt_kwargs = dict(kwargs)
     for name in ("rmg_walltime", "rmg_max_processes", "rmg_max_iterations", "rmg_max_edge_species",
-                 "restart_from_seed", "rmg_hard_timeout_seconds", "rmg_heartbeat_timeout_seconds"):
+                 "restart_from_seed", "rmg_hard_timeout_seconds", "rmg_heartbeat_timeout_seconds",
+                 "rmg_simulator_atol", "rmg_simulator_rtol"):
         attempt_kwargs.pop(name, None)
     for budget in budgets:
-        attempt_dir = Path(run_dir) if budget.attempt == 1 else Path(run_dir) / "rmg-restarts" / f"attempt-{budget.attempt:02d}"
-        evidence = _collect_rmg_evidence_once(
-            smiles, attempt_dir, **attempt_kwargs,
-            rmg_walltime=budget.walltime, rmg_max_processes=budget.max_processes,
-            rmg_max_iterations=budget.max_iterations, rmg_max_edge_species=budget.max_edge_species,
-            restart_from_seed=restart_seed, rmg_hard_timeout_seconds=rmg_hard_timeout_seconds,
-            rmg_heartbeat_timeout_seconds=rmg_heartbeat_timeout_seconds,
-            rmg_start_method=rmg_start_method,
+        prior = attempts[-1] if attempts else None
+        if ((prior or {}).get("execution_assessment") or {}).get(
+            "termination_reason"
+        ) == "daspk_initial_step_singularity":
+            daspk_recovery_number += 1
+        solver_policy = solver_policy_for_attempt(
+            prior, recovery_number=max(1, daspk_recovery_number),
         )
+        attempt_dir = Path(run_dir) if budget.attempt == 1 else Path(run_dir) / "rmg-restarts" / f"attempt-{budget.attempt:02d}"
+        try:
+            evidence = _collect_rmg_evidence_once(
+                smiles, attempt_dir, **attempt_kwargs,
+                rmg_walltime=budget.walltime, rmg_max_processes=budget.max_processes,
+                rmg_max_iterations=budget.max_iterations, rmg_max_edge_species=budget.max_edge_species,
+                restart_from_seed=restart_seed, rmg_hard_timeout_seconds=rmg_hard_timeout_seconds,
+                rmg_heartbeat_timeout_seconds=rmg_heartbeat_timeout_seconds,
+                rmg_start_method=rmg_start_method,
+                rmg_simulator_atol=solver_policy.simulator_atol,
+                rmg_simulator_rtol=solver_policy.simulator_rtol,
+            )
+        except Exception as error:
+            # Input/library preparation can fail before the per-attempt runner
+            # has built its result. Preserve that failure as an attempt too;
+            # never replace it with the preceding incomplete model.
+            rmg_dir = attempt_dir / "rmg"
+            evidence = {
+                "kind": "rmg_kinetic_network_screen", "status": "failed",
+                "enumeration_status": "unavailable", "candidate_routes": [],
+                "failure_stage": "attempt_setup_or_execution",
+                "failure_reason": f"{type(error).__name__}: {error}",
+                "execution_assessment": {"status": "failed", "termination_reason": "attempt_exception"},
+                "artifacts": {key: str(rmg_dir / name) for key, name in (
+                    ("input", "input.py"), ("stdout", "rmg.stdout.log"), ("stderr", "rmg.stderr.log"),
+                    ("log", "RMG.log"), ("chemkin", "chemkin/chem_annotated.inp"),
+                    ("species_dictionary", "chemkin/species_dictionary.txt"), ("transport", "chemkin/tran.dat"),
+                    ("solver", "solver"), ("seed", "seed"), ("collision_rate_violators", "collision_rate_violators.log"),
+                )},
+            }
         evidence["attempt_budget"] = budget.as_dict()
+        evidence["solver_policy"] = solver_policy.as_dict()
+        # Persist before starting a later attempt, not only at controller exit.
+        # Refuse to continue if durable retention fails.
+        attempt_references.append(retain_rmg_attempt(
+            evidence, Path(run_dir) / "rmg-attempt-evidence",
+            attempt_number=budget.attempt, condition_contract=condition_contract,
+            predecessor=attempt_references[-1] if attempt_references else None,
+        ))
         attempts.append(evidence)
         if evidence.get("status") == "completed" or not restart_is_justified(evidence):
             break
@@ -737,13 +860,25 @@ def collect_rmg_evidence(
         if not seed.is_dir():
             break
         restart_seed = seed
-    final = attempts[-1]
+    final = deepcopy(attempts[-1])
     final["controller"] = {
         "status": "completed_converged" if final.get("status") == "completed" else "mechanism_not_converged",
         "attempt_count": len(attempts), "attempt_budgets": [budget.as_dict() for budget in budgets[:len(attempts)]],
+        "solver_policies": [attempt.get("solver_policy") for attempt in attempts],
         "convergence": convergence_comparison(attempts),
         "attempt_artifacts": [attempt.get("artifacts") for attempt in attempts],
-        "interpretation": "A restart is attempted only after genuine RMG resource exhaustion with a retained seed. Partial attempts cannot support persistence.",
+        "attempt_evidence": attempt_references,
+        "final_attempt_number": len(attempts),
+        "interpretation": (
+            "A restart is attempted only after bounded resource exhaustion or a recognized "
+            "DASPK initial-step singularity with a retained seed. Search budgets and numerical "
+            "solver policies remain separately recorded; partial attempts cannot support persistence."
+        ),
+    }
+    retained = build_retained_partial_routes(final, condition_contract or {})
+    final["retained_partial_routes"] = retained["routes"]
+    final["retained_attempt_diagnostics"] = {
+        key: value for key, value in retained.items() if key != "routes"
     }
     return final
 
@@ -788,8 +923,31 @@ def run_stability_screen(
     verification_timeout_seconds: float | None = 14400.0,
     verification_orientations: int = 3,
     verification_neb_images: int = 8,
+    graph_xtb_discovery: bool = False,
+    graph_xtb_budget: dict | None = None,
+    graph_xtb_executable: str | None = None,
+    graph_xtb_ncores: int | None = None,
+    precomputed_graph_xtb_discovery: Any | None = None,
+    rate_uncertainty_evidence: Any | None = None,
 ) -> dict:
     """Collect ORCA and RMG stability evidence in one retained run directory."""
+    from .kinetic_uncertainty import (
+        coerce_rate_uncertainty_evidence,
+        rate_uncertainty_artifact,
+    )
+    from .plausibility import electronic_state_parity
+
+    # Validate allocation evidence before starting any expensive calculation.
+    # An omitted record remains omitted; no default uncertainty is inferred.
+    rate_uncertainties = coerce_rate_uncertainty_evidence(rate_uncertainty_evidence)
+    electronic_state = electronic_state_parity(
+        smiles, charge=charge, multiplicity=multiplicity,
+    )
+    if not electronic_state["spin_parity_consistent"]:
+        raise ValueError(
+            "Declared charge/multiplicity has the wrong electron parity for the molecular formula "
+            f"({electronic_state['electron_count']} electrons, multiplicity {multiplicity})"
+        )
     # Backward-compatible API alias.  The old flag only handled collision
     # warnings; it now enables/disables the complete generic verifier.
     if auto_verify_collision_routes is not None:
@@ -868,19 +1026,185 @@ def run_stability_screen(
         orca = collect_orca_evidence(
             smiles, run_dir, charge=charge, multiplicity=multiplicity,
             ncores=ncores, method_profile=method_profile,
+            timeout_seconds=verification_timeout_seconds,
         )
-    rmg = collect_rmg_evidence(smiles, run_dir, rmg_env=rmg_env, rmg_command=rmg_command,
-                               barrier_threshold=barrier_threshold, temperature=temperature, pressure=pressure,
-                               rmg_walltime=resource_config["walltime"], rmg_max_processes=resource_config["max_processes"],
-                               rmg_max_iterations=resource_config["max_iterations"], rmg_max_edge_species=resource_config["max_edge_species"],
-                               rmg_max_objects_per_iteration=resource_config["max_objects_per_iteration"],
-                               rmg_maximum_heavy_atoms=rmg_maximum_heavy_atoms,
-                               scenario=scenario_config, conditions=conditions, reaction_libraries=reaction_libraries,
-                               database_reaction_libraries=selected_database_libraries,
-                               rmg_retry_attempts=rmg_retry_attempts,
-                               rmg_hard_timeout_seconds=rmg_hard_timeout_seconds,
-                               rmg_heartbeat_timeout_seconds=rmg_heartbeat_timeout_seconds,
-                               rmg_start_method=rmg_start_method)
+    if graph_xtb_discovery and precomputed_graph_xtb_discovery is not None:
+        raise ValueError(
+            "Choose either a new graph/xTB discovery search or a precomputed graph/xTB discovery artifact, not both"
+        )
+    graph_discovery_enabled = graph_xtb_discovery or precomputed_graph_xtb_discovery is not None
+    discovery_evidence: dict | None = None
+    discovery_assembly = None
+    coverage_policy = None
+    mechanism_coverage: dict | None = None
+    supplemental_candidate_routes: list[dict] = []
+    def produce_rmg_evidence() -> dict:
+        return collect_rmg_evidence(
+            smiles, run_dir, rmg_env=rmg_env, rmg_command=rmg_command,
+            barrier_threshold=barrier_threshold, temperature=temperature,
+            pressure=pressure, rmg_walltime=resource_config["walltime"],
+            rmg_max_processes=resource_config["max_processes"],
+            rmg_max_iterations=resource_config["max_iterations"],
+            rmg_max_edge_species=resource_config["max_edge_species"],
+            rmg_max_objects_per_iteration=resource_config["max_objects_per_iteration"],
+            rmg_maximum_heavy_atoms=rmg_maximum_heavy_atoms,
+            scenario=scenario_config, conditions=conditions,
+            reaction_libraries=reaction_libraries,
+            database_reaction_libraries=selected_database_libraries,
+            rmg_retry_attempts=rmg_retry_attempts,
+            rmg_hard_timeout_seconds=rmg_hard_timeout_seconds,
+            rmg_heartbeat_timeout_seconds=rmg_heartbeat_timeout_seconds,
+            rmg_start_method=rmg_start_method,
+        )
+
+    # Every stability run now enters the same source-neutral discovery assembly.
+    # When graph/xTB is not requested the retained RMG-only assembly is still
+    # assessed, and the coverage policy records the missing independent source
+    # instead of silently bypassing mechanism-coverage accounting.
+    if discovery_assembly is None:
+        from .campaign_evidence import evidence_content_hash
+        from .discovery_assembly import DiscoveryAssemblyExecutor
+        from .graph_xtb_discovery import GraphXtbBudget, GraphXtbDiscoveryBackend
+
+        graph_budget = (
+            GraphXtbBudget.coerce(graph_xtb_budget)
+            if graph_discovery_enabled else None
+        )
+        library_evidence = []
+        for path_value in reaction_libraries or []:
+            library_path = Path(path_value)
+            try:
+                content_sha256 = evidence_content_hash(library_path)
+                evidence_status = "content_hashed"
+            except ValueError as error:
+                if library_path.is_dir() and not any(
+                    item.is_file() for item in library_path.rglob("*")
+                ):
+                    content_sha256 = "sha256:" + hashlib.sha256(
+                        b"storca-empty-rmg-reaction-library-directory-v1"
+                    ).hexdigest()
+                    evidence_status = "empty_library_directory"
+                else:
+                    raise error
+            library_evidence.append({
+                "path": str(library_path),
+                "content_sha256": content_sha256,
+                "status": evidence_status,
+                "kind": "rmg_reaction_library",
+            })
+        rmg_contract = {
+            "rmg_environment": rmg_env,
+            "rmg_command": rmg_command,
+            "barrier_threshold_kcal_mol": barrier_threshold,
+            "resource_config": resource_config,
+            "maximum_heavy_atoms": rmg_maximum_heavy_atoms,
+            "retry_attempts": rmg_retry_attempts,
+            "hard_timeout_seconds": rmg_hard_timeout_seconds,
+            "heartbeat_timeout_seconds": rmg_heartbeat_timeout_seconds,
+            "start_method": rmg_start_method,
+            "database_reaction_libraries": selected_database_libraries,
+            "reaction_library_evidence": library_evidence,
+            "scenario": scenario_config,
+        }
+        system = {
+            "smiles": smiles,
+            "charge": charge,
+            "multiplicity": multiplicity,
+            "target_label": conditions.target_label,
+            "reactive_partners": [
+                {
+                    key: item[key]
+                    for key in (
+                        "label", "smiles", "charge", "multiplicity", "reactive",
+                    )
+                    if key in item
+                }
+                for item in scenario_config.get("additional_species") or []
+                if item.get("reactive") is True
+            ],
+            "environment": {
+                "condition_contract_id": condition_contract.get("contract_id"),
+                "phase_model": condition_contract.get("phase_model"),
+            },
+        }
+        graph_backend = None
+        if graph_xtb_discovery:
+            print("[STORCA] Bounded multi-source reaction discovery started", flush=True)
+            graph_backend = GraphXtbDiscoveryBackend(
+                executable=graph_xtb_executable,
+                ncores=graph_xtb_ncores or ncores,
+            )
+        elif precomputed_graph_xtb_discovery is not None:
+            print(
+                "[STORCA] Reusing bounded graph/xTB discovery evidence for this condition; "
+                "its retained scope will be checked before coverage is credited",
+                flush=True,
+            )
+        else:
+            print(
+                "[STORCA] Retaining RMG-only discovery assembly; independent discovery "
+                "coverage will remain unresolved",
+                flush=True,
+            )
+        assembly = DiscoveryAssemblyExecutor().execute(
+            system=system,
+            condition_contract=condition_contract,
+            workdir=run_dir / "reaction-discovery",
+            rmg_producer=produce_rmg_evidence,
+            rmg_contract=rmg_contract,
+            graph_xtb_budget=(graph_budget.as_dict() if graph_budget else None),
+            graph_backend=graph_backend,
+            precomputed_graph_xtb=precomputed_graph_xtb_discovery,
+            maximum_graph_candidates_for_verification=(
+                graph_budget.max_candidates_for_verification if graph_budget else 0
+            ),
+            maximum_earlier_rmg_candidates_for_verification=verification_max_iterations,
+        )
+        discovery_assembly = assembly
+        rmg = dict(assembly.rmg_evidence)
+        supplemental_candidate_routes = [
+            dict(item) for item in assembly.supplemental_verification_queue
+        ]
+        discovery_evidence = assembly.reaction_discovery_artifact()
+        from .discovery_coverage import (
+            CoveragePolicy, assess_discovery_coverage, write_discovery_coverage,
+        )
+
+        coverage_policy = CoveragePolicy.for_assembly(
+            assembly,
+            observable_kind="t95",
+            environment_kind=str(
+                condition_contract.get("phase_model") or "homogeneous_gas"
+            ),
+            benchmark_profile="current_storca_gas_contract_regression_v1",
+        )
+        mechanism_coverage = assess_discovery_coverage(
+            assembly,
+            coverage_policy,
+            observable_context={
+                "kind": "t95",
+                "target_label": conditions.target_label,
+                "retention_fraction": retention_fraction,
+                "maximum_duration_seconds": condition_contract.get(
+                    "maximum_duration_seconds"
+                ),
+            },
+        )
+        coverage_path = write_discovery_coverage(
+            run_dir / "reaction-discovery" / "mechanism-coverage.json",
+            mechanism_coverage,
+        )
+        mechanism_coverage = {
+            **mechanism_coverage,
+            "artifact": str(coverage_path),
+        }
+        discovery_evidence["mechanism_coverage"] = mechanism_coverage
+        print(
+            "[STORCA] Bounded multi-source reaction discovery finished: "
+            f"{assembly.status}; {len(supplemental_candidate_routes)} supplemental discovery "
+            "candidate(s) eligible for verification",
+            flush=True,
+        )
     risk_flags: list[str] = []
     if orca["status"] != "completed":
         risk_flags.append("orca_evidence_incomplete")
@@ -905,6 +1229,13 @@ def run_stability_screen(
     if (target_loss_commitment.get("committed_target_loss_kmol") or 0.0) > 0.0:
         risk_flags.append("modeled_committed_target_loss")
     kinetic_status = (rmg.get("kinetic_relevance") or {}).get("status")
+    propagation_blockers = isothermal_propagation_blockers(
+        rmg.get("independent_cantera_propagation") or {}, condition_contract,
+    )
+    rmg["propagation_condition_validation"] = {
+        "status": "rejected" if propagation_blockers else "passed",
+        "blocking_reasons": propagation_blockers,
+    }
     advisories: list[str] = []
     # Completion and coverage are gates, not advisories.  In particular, RMG
     # can save a long solver profile while model generation was interrupted;
@@ -917,6 +1248,13 @@ def run_stability_screen(
         assessment_reason = (
             "The parent structure was not validated as a local minimum by the retained ORCA frequency calculation. "
             "A model no-loss result cannot override that failed structural gate."
+        )
+    elif propagation_blockers:
+        assessment_status = "incomplete_evidence"
+        assessment_reason = (
+            "Independent propagation does not demonstrate the requested isothermal conditions: "
+            + ", ".join(propagation_blockers)
+            + ". Repropagate the retained mechanism before using its flux or lifetime."
         )
     elif (rmg.get("kinetics_validation") or {}).get("status") not in {"passed", "kinetics_unreliable"}:
         assessment_status = "incomplete_evidence"
@@ -965,11 +1303,17 @@ def run_stability_screen(
         "advisories": advisories,
         "orca_evidence": orca,
         "rmg_evidence": rmg,
+        "reaction_discovery": discovery_evidence,
+        "mechanism_coverage": mechanism_coverage,
+        "rate_uncertainty_evidence": rate_uncertainty_artifact(rate_uncertainties),
         "target_loss_commitment": target_loss_commitment,
         "kinetic_lifetime": {
             "retention_fraction": retention_fraction,
             "estimated_time_to_retention_seconds": None,
-            "screening_estimated_time_to_retention_seconds": (rmg.get("kinetic_relevance") or {}).get("estimated_time_to_retention_seconds"),
+            "screening_estimated_time_to_retention_seconds": (
+                (rmg.get("kinetic_relevance") or {}).get("estimated_time_to_retention_seconds")
+                if not propagation_blockers else None
+            ),
             "interpretation": "The RMG screen estimate is retained for triage only. This field remains null until ORCA verifies the selected route by TS, one imaginary mode, IRC endpoints, and condition-specific kinetics.",
         },
         "condition_contract": condition_contract,
@@ -984,25 +1328,96 @@ def run_stability_screen(
         "route_energy_ceiling_kcal_mol": barrier_threshold,
         },
     }
+    discovery_assembly_status = (
+        discovery_evidence.get("assembly_status")
+        if isinstance(discovery_evidence, dict) else None
+    )
+    if discovery_assembly_status not in {None, "completed_declared_search"}:
+        result["risk_flags"] = list(dict.fromkeys([
+            *result["risk_flags"], "requested_reaction_discovery_incomplete",
+        ]))
+        result["assessment"] = {
+            "status": "incomplete_evidence",
+            "reason": (
+                "The requested multi-source discovery assembly is "
+                f"{discovery_assembly_status}; no target-loss or lifetime conclusion "
+                "is defensible even if the retained RMG model completed."
+            ),
+        }
+    elif mechanism_coverage and mechanism_coverage.get("blocking_findings"):
+        result["risk_flags"] = list(dict.fromkeys([
+            *result["risk_flags"], "mechanism_coverage_unresolved",
+        ]))
+        result["assessment"] = {
+            "status": "incomplete_evidence",
+            "reason": (
+                "Independent discovery retained one or more potentially influential "
+                "coverage questions. A model-only target-loss result cannot resolve them."
+            ),
+        }
     result["limitations"] = [
         "This is a condition-specific model screen, not a laboratory safety assessment.",
         "No detected route is not evidence of shelf-life, compatibility, or absence of hazards.",
         scenario_config["model_applicability"],
     ]
+    if graph_discovery_enabled:
+        result["limitations"].extend([
+            "Independent graph/xTB discovery is bounded to a single target molecule and does not establish mechanism completeness.",
+            "GFN2-xTB endpoint energies screen graph proposals only; they are not barriers, rate coefficients, or kinetic relevance evidence.",
+        ])
     result_path = run_dir / "stability.json"
     result_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+    from .rmg_partial_candidates import validated_retained_partial_routes
+    retained_routes = validated_retained_partial_routes(rmg, conditions.as_dict())
     rmg_has_orca_queue = (
         rmg.get("status") == "completed"
         or rmg.get("enumeration_status") == "partial_enumeration"
+        or bool(retained_routes["routes"])
     )
+    has_orca_queue = rmg_has_orca_queue or bool(supplemental_candidate_routes)
     if (auto_verify_routes and orca.get("status") == "completed" and orca.get("local_minimum") is True
-            and rmg_has_orca_queue):
+            and has_orca_queue):
         print("[STORCA] Generic flux-guided ORCA/Arkane verification planning started", flush=True)
         try:
-            from .verification_adapters import make_arkane_rate_builder, make_orca_route_verifier
+            from .verification_adapters import (
+                GENERIC_ORCA_PATH_VERIFIER_POLICY_ID,
+                make_arkane_rate_builder,
+                make_orca_route_verifier,
+            )
             from .verification_engine import VerificationEngineConfig, run_verification_engine
+            from .verification_resume import (
+                build_verification_execution_contract,
+                write_verification_execution_contract,
+            )
 
             base_libraries = list(reaction_libraries or [])
+            execution_contract = build_verification_execution_contract(
+                smiles=smiles, charge=charge, multiplicity=multiplicity,
+                ncores=ncores, method_profile=method_profile,
+                condition_contract=condition_contract,
+                scenario_config=scenario_config, resource_config=resource_config,
+                barrier_threshold=barrier_threshold, rmg_env=rmg_env,
+                rmg_command=rmg_command,
+                rmg_maximum_heavy_atoms=rmg_maximum_heavy_atoms,
+                rmg_retry_attempts=rmg_retry_attempts,
+                rmg_hard_timeout_seconds=rmg_hard_timeout_seconds,
+                rmg_heartbeat_timeout_seconds=rmg_heartbeat_timeout_seconds,
+                rmg_start_method=rmg_start_method,
+                database_reaction_libraries=selected_database_libraries,
+                reaction_libraries=base_libraries,
+                verification_max_iterations=verification_max_iterations,
+                verification_timeout_seconds=verification_timeout_seconds,
+                verification_orientations=verification_orientations,
+                verification_neb_images=verification_neb_images,
+            )
+            execution_contract_path = write_verification_execution_contract(
+                run_dir, execution_contract,
+            )
+            write_metadata(
+                run_dir,
+                verification_execution_contract=str(execution_contract_path),
+                path_verifier_policy_id=GENERIC_ORCA_PATH_VERIFIER_POLICY_ID,
+            )
             verify_route = make_orca_route_verifier(
                 smiles,
                 ncores=ncores,
@@ -1011,6 +1426,7 @@ def run_stability_screen(
                 timeout_seconds=verification_timeout_seconds,
                 orientations=verification_orientations,
                 neb_images=verification_neb_images,
+                rmg_env=rmg_env,
             )
             build_rate = make_arkane_rate_builder(
                 condition_contract,
@@ -1066,6 +1482,10 @@ def run_stability_screen(
                 build_rate=build_rate,
                 rerun_model=rerun_model,
                 config=VerificationEngineConfig(max_iterations=verification_max_iterations),
+                supplemental_candidate_routes=supplemental_candidate_routes,
+                rate_uncertainties=rate_uncertainties,
+                rmg_env=rmg_env,
+                path_verifier_policy_id=GENERIC_ORCA_PATH_VERIFIER_POLICY_ID,
             )
         except Exception as error:
             verification = {
@@ -1076,6 +1496,41 @@ def run_stability_screen(
                 "condition_contract": condition_contract,
                 "condition_contract_match": True,
                 "estimated_time_to_retention_seconds": None,
+            }
+        discovery_assembly_status = (
+            discovery_evidence.get("assembly_status")
+            if isinstance(discovery_evidence, dict) else None
+        )
+        if (
+            discovery_assembly_status not in {None, "completed_declared_search"}
+            and verification.get("status") in {
+                "verified_t95_converged", "verified_below_loss_threshold",
+                "no_target_loss_in_completed_rmg_model",
+            }
+        ):
+            retained_verification_status = verification.get("status")
+            verification = {
+                **verification,
+                "status": "verification_incomplete",
+                "rate_network_verification_status": retained_verification_status,
+                "estimated_time_to_retention_seconds": None,
+                "reason": (
+                    "Rate/path verification completed within the retained model, but the "
+                    f"requested discovery assembly is {discovery_assembly_status}; "
+                    "mechanism coverage remains unresolved."
+                ),
+                "discovery_assembly_gate": {
+                    "status": "blocked",
+                    "assembly_status": discovery_assembly_status,
+                    "assembly_contract_id": discovery_evidence.get(
+                        "assembly_contract_id"
+                    ),
+                    "unresolved_candidate_or_assertion_ids": (
+                        (discovery_evidence.get("candidate_accounting") or {}).get(
+                            "unresolved_candidate_or_assertion_ids", []
+                        )
+                    ),
+                },
             }
         result["verification_summary"] = verification
         verification_status = verification.get("status")
@@ -1090,15 +1545,41 @@ def run_stability_screen(
                 interpretation="Condition-specific t95 from the converged repaired mechanism after ORCA/Arkane verification.",
             )
         elif verification_status == "verified_below_loss_threshold":
-            result["assessment"] = {
-                "status": "verified_route_below_loss_threshold",
-                "reason": "Verified controlling-route rates and conservative unresolved-route bounds remain below the retention threshold in this condition model.",
-            }
+            if str(verification.get("rate_verification_status") or "").startswith(
+                "collision_bounded_for_observable"
+            ):
+                result["assessment"] = {
+                    "status": "collision_bounded_model_below_loss_threshold",
+                    "reason": (
+                        "The retained-network observable remains below the threshold at the "
+                        "admissible collision-rate bounds. The offending rate is not thereby "
+                        "verified, and independent mechanism-coverage gates still apply."
+                    ),
+                }
+            else:
+                result["assessment"] = {
+                    "status": "verified_route_below_loss_threshold",
+                    "reason": "Verified controlling-route rates and conservative unresolved-route bounds remain below the retention threshold in this condition model.",
+                }
         elif verification_status == "no_target_loss_in_completed_rmg_model":
             result["assessment"] = {
                 "status": "no_loss_detected_in_rmg_model",
                 "reason": verification.get("reason"),
             }
+        elif verification_status == "conditional_model_prediction":
+            result["assessment"] = {
+                "status": "conditional_kinetic_model_prediction",
+                "reason": verification.get("reason"),
+            }
+            result["conditional_model_prediction"] = verification.get("conditional_model_prediction")
+            result["kinetic_lifetime"].update(
+                estimated_time_to_retention_seconds=None,
+                interpretation="Only a finite-horizon fixed-model profile is available; no physical lifetime is admitted.",
+            )
+            result["risk_flags"] = list(dict.fromkeys([
+                *result["risk_flags"], "conditional_model_only", "rate_uncertainty_uncalibrated",
+                "pressure_applicability_unresolved",
+            ]))
         else:
             result["assessment"] = {
                 "status": "orca_verification_incomplete",
@@ -1124,7 +1605,7 @@ def run_stability_screen(
             failed_gates.append("orca_evidence_not_completed")
         elif orca.get("local_minimum") is not True:
             failed_gates.append("orca_parent_not_a_validated_local_minimum")
-        if not rmg_has_orca_queue:
+        if not has_orca_queue:
             failed_gates.append("rmg_evidence_not_completed")
         result["verification_summary"] = {
             "schema_version": 1,
@@ -1137,13 +1618,85 @@ def run_stability_screen(
             "claim_scope": "verification_incomplete_no_condition_lifetime",
         }
         result_path.write_text(json.dumps(result, indent=2, sort_keys=True, default=str) + "\n")
+    if discovery_assembly is not None and coverage_policy is not None:
+        from .discovery_coverage import (
+            assess_discovery_coverage, write_discovery_coverage,
+        )
+
+        mechanism_coverage = assess_discovery_coverage(
+            discovery_assembly,
+            coverage_policy,
+            observable_context={
+                "kind": "t95",
+                "target_label": conditions.target_label,
+                "retention_fraction": retention_fraction,
+                "maximum_duration_seconds": condition_contract.get(
+                    "maximum_duration_seconds"
+                ),
+            },
+            verification_summary=result.get("verification_summary"),
+        )
+        coverage_path = write_discovery_coverage(
+            run_dir / "reaction-discovery" / "mechanism-coverage.json",
+            mechanism_coverage,
+        )
+        mechanism_coverage = {
+            **mechanism_coverage,
+            "artifact": str(coverage_path),
+        }
+        result["mechanism_coverage"] = mechanism_coverage
+        if isinstance(result.get("reaction_discovery"), dict):
+            result["reaction_discovery"]["mechanism_coverage"] = mechanism_coverage
+        verification_status = str(
+            (result.get("verification_summary") or {}).get("status") or ""
+        )
+        if (
+            verification_status in {
+                "verified_t95_converged", "verified_below_loss_threshold",
+                "no_target_loss_in_completed_rmg_model",
+            }
+            and not mechanism_coverage.get("supports_observable_claim")
+        ):
+            retained_verification_status = verification_status
+            result["verification_summary"] = {
+                **result["verification_summary"],
+                "status": "verification_incomplete",
+                "rate_network_verification_status": retained_verification_status,
+                "estimated_time_to_retention_seconds": None,
+                "reason": (
+                    "Rate/path propagation converged within the retained kinetic model, "
+                    "but observable-conditioned mechanism coverage remains unresolved."
+                ),
+                "mechanism_coverage_gate": {
+                    "status": "blocked",
+                    "coverage_assessment_id": mechanism_coverage.get("assessment_id"),
+                    "coverage_status": mechanism_coverage.get("status"),
+                    "blocking_findings": mechanism_coverage.get(
+                        "blocking_findings", []
+                    ),
+                },
+            }
+            result["kinetic_lifetime"]["estimated_time_to_retention_seconds"] = None
+            result["assessment"] = {
+                "status": "orca_verification_incomplete",
+                "reason": result["verification_summary"]["reason"],
+            }
+            result["risk_flags"] = list(dict.fromkeys([
+                *result["risk_flags"], "mechanism_coverage_unresolved",
+            ]))
+
+    assessment_status = result["assessment"]["status"]
+    result_path.write_text(
+        json.dumps(result, indent=2, sort_keys=True, default=str) + "\n"
+    )
     terminal_statuses = {
         "no_loss_detected_in_rmg_model", "verified_route_below_loss_threshold",
         "orca_verified_condition_dependent_instability",
     }
     metadata_status = "completed" if assessment_status in terminal_statuses else "completed_with_risk_or_incomplete_evidence"
     write_metadata(run_dir, result_json=str(result_path), status=metadata_status, assessment_status=assessment_status)
-    return {**result, "result_json": result_path, "chemkin_file": Path(rmg["artifacts"]["chemkin"])}
+    chemkin = (rmg.get("artifacts") or {}).get("chemkin")
+    return {**result, "result_json": result_path, "chemkin_file": Path(chemkin) if chemkin else None}
 def _resolve_rmg_route_endpoints(route: dict, mechanism_inspection: dict | None, index: int) -> dict:
     """Attach exact retained species and an explicit electronic-state contract.
 

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "kind": "storca_scientific_panel_regression_before_fix",
+  "status": "two_expected_failures_retained",
+  "chemistry_jobs_executed": 0,
+  "source_before_sha256": "1c3b32a1f67dfa7729ece74df0b72dd124aa3522be8330ce93ecb4e63fc715e9",
+  "tests_with_reproducers_sha256": "8524ddd0def1c99437bb52df089d33bfc88991322d7def94f44e7ca8fbae6196",
+  "command": "env PYTHONPATH=.:tests OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 /opt/homebrew/anaconda3/envs/orca-auto-py312/bin/python -m unittest test_scientific_panel.ScientificPanelTests.test_pressure_regime_projection_is_explicit_and_rejects_nested_reference test_scientific_panel.ScientificPanelTests.test_scoring_audit_binding_rejects_numeric_conditions_and_observable_changes",
+  "observed_exit_code": 1,
+  "tests_run": 2,
+  "failures": [
+    {"test": "test_pressure_regime_projection_is_explicit_and_rejects_nested_reference", "failure": "AssertionError: None != 'high_pressure_limit'", "meaning": "Physical HPL regime was silently dropped by request projection; nested regime/reference handling is included in the retained regression."},
+    {"test": "test_scoring_audit_binding_rejects_numeric_conditions_and_observable_changes", "failure": "AssertionError: ValueError not raised", "meaning": "Changing the copied scoring rate was not bound to the hash-checked source audit."}
+  ],
+  "interpretation": "Synthetic code regressions only; not chemical calculations, experimental validation or evidence of supported applicability."
+}

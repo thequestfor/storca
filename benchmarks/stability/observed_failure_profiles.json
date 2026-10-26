@@ -1,0 +1,187 @@
+{
+  "schema_version": 1,
+  "kind": "storca_observed_stability_failure_profiles",
+  "validation_level": "retained_live_failure_regression",
+  "scientific_validation_complete": false,
+  "profiles": [
+    {
+      "profile_id": "cyclobutene-family-atom-trace-v1",
+      "system_smiles": "C1=CCC1",
+      "source_run": "runs/p1-cyclobutene-mapping-002",
+      "lane": "p1-pure-gas-development",
+      "observed": {
+        "generic_mapping_status": "ambiguous_atom_mapping",
+        "generic_symmetry_class_count": 2,
+        "recipe_mapping_status": "resolved",
+        "directions_checked": 2,
+        "hydrogen_transfers": 0,
+        "reopened_mapping_identical": true,
+        "original_files_unchanged": true,
+        "path_claim_allowed": false,
+        "rate_claim_allowed": false,
+        "lifetime_claim_allowed": false
+      },
+      "required_regression_claim": "An independently discovered RMG recipe may supply source-bound atom correspondence, but must not bypass endpoint state/isotope checks, distinct-map ambiguity, hydrogen accounting, source hashes, TS/IRC validation or rate admission."
+    },
+    {
+      "profile_id": "cyclobutene-isothermal-energy-contract-v1",
+      "system_smiles": "C1=CCC1",
+      "source_run": "runs/p1-cyclobutene-preflight-001/isothermal-replay-001",
+      "lane": "p1-pure-gas-development",
+      "observed": {
+        "requested_temperature_K": 423.15,
+        "energy_enabled_before_fix": true,
+        "final_temperature_K_before_fix": 771.2329120915871,
+        "t95_relative_numerical_error_before_fix": 0.6146492989,
+        "energy_enabled_after_fix": false,
+        "final_temperature_K_after_fix": 423.15,
+        "t95_relative_numerical_error_after_fix": 0.00004627733419480619,
+        "original_files_unchanged": true,
+        "comparator": "Analytical fixed-temperature reversible first-order solution using the converted Cantera rates, not an experimental rate or verified lifetime."
+      },
+      "required_regression_claim": "Successful integration and closed flux cannot authorize an isothermal prediction if energy is enabled or the observed temperature/pressure differ from the condition contract; legacy outputs without physical-model evidence require repropagation, not a fabricated condition stamp."
+    },
+    {
+      "profile_id": "nnonc-rmg-chebyshev-export-zero-pressure-v1",
+      "system_smiles": "NNONC",
+      "source_run": "runs/unexpected-channel-rate-handoff-reaction-2cdf1d1a16c24c3a-001/network-repair-003",
+      "lane": "dark-low-pressure",
+      "observed": {
+        "route_id": "reaction-2cdf1d1a16c24c3a",
+        "reaction_index": 0,
+        "chemkin_sha256": "2d07bc346c880ea854c3cef3d0eefd734a89f895e4d7083e3afbdc99c9ee30f3",
+        "source_minimum_pressure_bar": 1e-6,
+        "exported_minimum_pressure_atm": 0.0,
+        "source_condition_rate_s_1": 3.235611525078417e-7,
+        "reloaded_condition_rate_finite": false,
+        "first_core_reaction_count": 93,
+        "core_collision_violation_count": 12,
+        "generation_completed": false,
+        "first_attempt_stop_reason": "resource_or_interrupt_termination"
+      },
+      "required_regression_claim": "A core-inserted rate must survive dimensional, precision-preserving serialization and reload; nonfinite rates invalidate inspection, and a finite repaired export does not erase incomplete discovery or other collision violations."
+    },
+    {
+      "profile_id": "nnonc-graph-irc-iteration-limit-v1",
+      "system_smiles": "NNONC",
+      "source_run": "runs/stability-ladder-20260831T180238Z",
+      "lane": "dark-low-pressure",
+      "observed": {
+        "session": "verification-engine-002",
+        "route_id": "reaction-f6f092d4fb6f13b5",
+        "source_output_sha256": "273e489d9744b9d60e325786f39048e4fc41d85887ba0951ec2284526b7c54ac",
+        "normal_termination": true,
+        "ts_imaginary_frequency_cm_1": -568.53,
+        "maximum_iterations_reached_both_directions": true,
+        "last_iteration_index": 39,
+        "forward_final_max_gradient": 0.003127,
+        "forward_final_rms_gradient": 0.001003,
+        "backward_final_max_gradient": 0.001198,
+        "backward_final_rms_gradient": 0.000579,
+        "maximum_gradient_tolerance": 0.002,
+        "rms_gradient_tolerance": 0.0005,
+        "terminal_path_status": "irc_endpoint_validation_failed"
+      },
+      "required_regression_claim": "Normal ORCA exit and a single TS imaginary mode cannot promote an iteration-limited IRC, even when endpoint connectivity matches; retain directional convergence evidence and distinguish incomplete tracing from a disproved pathway."
+    },
+    {
+      "profile_id": "h2o2-air-near-equilibrium-flux-v1",
+      "system_smiles": "OO",
+      "source_run": "runs/stability-ladder-20260831T175653Z",
+      "lane": "dark-dry-air",
+      "observed": {
+        "initial_target_amount_kmol": 0.0004033954554510349,
+        "amount_profile_target_loss_kmol": 1.6983484930899184e-15,
+        "integrated_net_target_loss_kmol": 5.443252811100867e-12,
+        "numerical_closure_absolute_error_kmol": 5.441554462607777e-12,
+        "numerical_closure_relative_error": 0.9996879901500025,
+        "retention_loss_threshold_fraction": 0.05,
+        "adaptive_sample_count": 1280,
+        "terminal_reason": "flux_plan_insufficient_solver_evidence"
+      },
+      "required_regression_claim": "No below-threshold observable may be released until profile loss, numerical error, invalid-rate influence, and mechanism-coverage uncertainty are jointly bounded below the requested loss threshold."
+    },
+    {
+      "profile_id": "h2o2-collision-limit-applicability-v1",
+      "system_smiles": "OO",
+      "source_run": "runs/stability-ladder-20260831T175653Z",
+      "lane": "dark-dry-air",
+      "observed": {
+        "reaction_equation": "2 HO2 <=> O2 + H2O2",
+        "direction": "forward",
+        "rate_to_collision_limit_ratio": 34.16670988033027,
+        "terminal_model_status": "kinetics_unreliable"
+      },
+      "required_regression_claim": "An influential collision-limit violation must be bounded or escalated without silently clipping the rate or breaking forward/reverse thermodynamic consistency."
+    },
+    {
+      "profile_id": "h2o2-weak-band-photochemistry-v1",
+      "system_smiles": "OO",
+      "source_run": "runs/stability-ladder-20260831T175653Z",
+      "lane": "sunlight-dry-air",
+      "observed": {
+        "candidate_route": "O-O homolysis",
+        "transition_count_inside_source_window": 0,
+        "nearest_bright_transition_nm": 52.3,
+        "minimum_oscillator_strength": 0.01,
+        "terminal_reason": "photochemical_channel_not_validated"
+      },
+      "required_regression_claim": "Weak absorption must be evaluated by exposure-integrated observable influence rather than discarded solely by a fixed bright-state cutoff."
+    },
+    {
+      "profile_id": "nnonc-orca-openmpi-interface-v1",
+      "system_smiles": "NNONC",
+      "source_run": "runs/stability-ladder-20260831T180238Z",
+      "lane": "dark-low-pressure",
+      "observed": {
+        "route": "NNONC <=> [NH]N + CN[O]",
+        "requested_ncores": 4,
+        "markers": [
+          "ptl_tool: problems getting address",
+          "no available interfaces were found",
+          "ORCA finished by error termination in Startup"
+        ],
+        "terminal_path_status": "stationary_point_validation_failed"
+      },
+      "required_regression_claim": "Infrastructure startup denial must receive bounded append-only execution recovery and must never be classified as chemical endpoint failure."
+    },
+    {
+      "profile_id": "nnonc-rmg-daspk-initial-step-v1",
+      "system_smiles": "NNONC",
+      "source_run": "runs/stability-ladder-20260831T180238Z",
+      "lane": "dark-low-pressure",
+      "observed": {
+        "wrapper_returned_success": true,
+        "execution_status": "incomplete",
+        "termination_reason": "daspk_initial_step_singularity",
+        "screening_t95_seconds": 0.001643551382817551
+      },
+      "required_regression_claim": "A successful wrapper exit cannot promote a singular propagation; bounded solver recovery must either complete or retain a precise exhausted-recovery state."
+    },
+    {
+      "profile_id": "nnonc-intermediate-identity-v1",
+      "system_smiles": "NNONC",
+      "source_run": "runs/stability-ladder-20260831T180238Z",
+      "lane": "dark-dry-inert",
+      "observed": {
+        "route": "NNONC <=> [NH]N + CN[O]",
+        "stationary_point_status": "validated",
+        "terminal_path_status": "intermediate_identity_unresolved",
+        "screening_t95_seconds": 0.013996264435205097
+      },
+      "required_regression_claim": "A stationary minimum may become an elementary network node only after connectivity, charge, spin, mapping, and distinctness establish its identity."
+    }
+  ],
+  "implementation_order": [
+    "orca_execution_recovery",
+    "rmg_solver_recovery",
+    "flux_extent_integration",
+    "observable_scaled_below_threshold_bound",
+    "invalid_rate_applicability_envelope",
+    "intermediate_identity_resolution",
+    "adaptive_rate_model_escalation",
+    "photochemical_exposure_admission",
+    "humid_closed_shell_discovery"
+  ],
+  "limitations": "These are retained live-run observations and bounded actual-artifact replays, not experimental reference values or proof of chemical accuracy."
+}

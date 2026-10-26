@@ -1,0 +1,252 @@
+{
+  "schema_version": 1,
+  "kind": "storca_specialist_rate_benchmark_manifest",
+  "status": "development_reference_set",
+  "holdout_locked": false,
+  "scope": "Development anchors for capture-plus-master-equation providers. These evaluated limits test rate magnitude, units, bath-gas dependence, uncertainty reporting, and fail-closed applicability. They do not prove a microscopic mechanism and do not authorize a supported STORCA lane.",
+  "required_partitions": [
+    "development",
+    "holdout",
+    "challenge"
+  ],
+  "acceptance_gate": {
+    "maximum_median_absolute_log10_error": 0.30103,
+    "maximum_absolute_log10_error": 0.69897,
+    "minimum_uncertainty_coverage_fraction": 0.8,
+    "maximum_false_applicability_count": 0,
+    "minimum_falloff_curve_count": 1,
+    "minimum_falloff_pressure_span_decades": 3.0,
+    "maximum_falloff_curve_rmse_log10": 0.30103,
+    "holdout_must_be_locked_before_provider_tuning": true
+  },
+  "cases": [
+    {
+      "case_id": "h-o2-association-air-300K-v1",
+      "partition": "development",
+      "problem_class": "barrierless_association_pressure_dependent",
+      "reaction_equation": "H + O2 (+M) -> HO2 (+M)",
+      "environment": {
+        "phase": "gas",
+        "bath_gas": "air"
+      },
+      "expected_provider_disposition": "verified",
+      "reference_sources": [
+        {
+          "citation": "Sander et al., Chemical Kinetics and Photochemical Data for Use in Atmospheric Studies, JPL Publication 10-6 (2011), Table 2-1.",
+          "url": "https://jpldataeval.jpl.nasa.gov/pdf/JPL%2010-6%20Final%2015June2011_20110620.pdf",
+          "source_kind": "evaluated_kinetic_recommendation",
+          "reference_scope": "Air low- and high-pressure limiting rate coefficients and evaluated uncertainty at 300 K."
+        },
+        {
+          "citation": "Michael et al., J. Phys. Chem. A 106, 5297-5313 (2002), DOI 10.1021/jp020229w.",
+          "url": "https://doi.org/10.1021/jp020229w",
+          "source_kind": "primary_experiment",
+          "reference_scope": "Low-pressure association measurements in seven bath gases and energy-transfer analysis."
+        }
+      ],
+      "reference_points": [
+        {
+          "point_id": "k0-air-300K",
+          "temperature_K": 300.0,
+          "pressure_regime": "low_pressure_limit",
+          "reference_rate": 4.4e-32,
+          "rate_units": "cm^6 molecule^-2 s^-1",
+          "reference_uncertainty_factor": 1.3,
+          "source_index": 0
+        },
+        {
+          "point_id": "kinf-300K",
+          "temperature_K": 300.0,
+          "pressure_regime": "high_pressure_limit",
+          "reference_rate": 7.5e-11,
+          "rate_units": "cm^3 molecule^-1 s^-1",
+          "reference_uncertainty_factor": 1.3,
+          "source_index": 0
+        }
+      ]
+    },
+    {
+      "case_id": "oh-oh-association-air-300K-v1",
+      "partition": "development",
+      "problem_class": "barrierless_association_pressure_dependent",
+      "reaction_equation": "OH + OH (+M) -> H2O2 (+M)",
+      "environment": {
+        "phase": "gas",
+        "bath_gas": "air"
+      },
+      "expected_provider_disposition": "verified",
+      "reference_sources": [
+        {
+          "citation": "Sander et al., Chemical Kinetics and Photochemical Data for Use in Atmospheric Studies, JPL Publication 10-6 (2011), Table 2-1.",
+          "url": "https://jpldataeval.jpl.nasa.gov/pdf/JPL%2010-6%20Final%2015June2011_20110620.pdf",
+          "source_kind": "evaluated_kinetic_recommendation",
+          "reference_scope": "Air low- and high-pressure limiting rate coefficients and evaluated uncertainty at 300 K."
+        }
+      ],
+      "reference_points": [
+        {
+          "point_id": "k0-air-300K",
+          "temperature_K": 300.0,
+          "pressure_regime": "low_pressure_limit",
+          "reference_rate": 6.9e-31,
+          "rate_units": "cm^6 molecule^-2 s^-1",
+          "reference_uncertainty_factor": 1.5,
+          "source_index": 0
+        },
+        {
+          "point_id": "kinf-300K",
+          "temperature_K": 300.0,
+          "pressure_regime": "high_pressure_limit",
+          "reference_rate": 2.6e-11,
+          "rate_units": "cm^3 molecule^-1 s^-1",
+          "reference_uncertainty_factor": 1.5,
+          "source_index": 0
+        }
+      ]
+    },
+    {
+      "case_id": "methyl-o2-association-air-300K-v1",
+      "partition": "development",
+      "problem_class": "barrierless_association_pressure_dependent",
+      "reaction_equation": "CH3 + O2 (+M) -> CH3O2 (+M)",
+      "environment": {
+        "phase": "gas",
+        "bath_gas": "air"
+      },
+      "expected_provider_disposition": "verified",
+      "reference_sources": [
+        {
+          "citation": "Sander et al., Chemical Kinetics and Photochemical Data for Use in Atmospheric Studies, JPL Publication 10-6 (2011), Table 2-1.",
+          "url": "https://jpldataeval.jpl.nasa.gov/pdf/JPL%2010-6%20Final%2015June2011_20110620.pdf",
+          "source_kind": "evaluated_kinetic_recommendation",
+          "reference_scope": "Air low- and high-pressure limiting rate coefficients and evaluated uncertainty at 300 K."
+        }
+      ],
+      "reference_points": [
+        {
+          "point_id": "k0-air-300K",
+          "temperature_K": 300.0,
+          "pressure_regime": "low_pressure_limit",
+          "reference_rate": 4.0e-31,
+          "rate_units": "cm^6 molecule^-2 s^-1",
+          "reference_uncertainty_factor": 1.1,
+          "source_index": 0
+        },
+        {
+          "point_id": "kinf-300K",
+          "temperature_K": 300.0,
+          "pressure_regime": "high_pressure_limit",
+          "reference_rate": 1.2e-12,
+          "rate_units": "cm^3 molecule^-1 s^-1",
+          "reference_uncertainty_factor": 1.1,
+          "source_index": 0
+        }
+      ]
+    },
+    {
+      "case_id": "ethyl-o2-association-air-300K-v1",
+      "partition": "development",
+      "problem_class": "barrierless_association_pressure_dependent",
+      "reaction_equation": "C2H5 + O2 (+M) -> C2H5O2 (+M)",
+      "environment": {
+        "phase": "gas",
+        "bath_gas": "air"
+      },
+      "expected_provider_disposition": "verified",
+      "reference_sources": [
+        {
+          "citation": "Sander et al., Chemical Kinetics and Photochemical Data for Use in Atmospheric Studies, JPL Publication 10-6 (2011), Table 2-1.",
+          "url": "https://jpldataeval.jpl.nasa.gov/pdf/JPL%2010-6%20Final%2015June2011_20110620.pdf",
+          "source_kind": "evaluated_kinetic_recommendation",
+          "reference_scope": "Air low- and high-pressure limiting rate coefficients and evaluated uncertainty at 300 K."
+        }
+      ],
+      "reference_points": [
+        {
+          "point_id": "k0-air-300K",
+          "temperature_K": 300.0,
+          "pressure_regime": "low_pressure_limit",
+          "reference_rate": 1.5e-28,
+          "rate_units": "cm^6 molecule^-2 s^-1",
+          "reference_uncertainty_factor": 1.2,
+          "source_index": 0
+        },
+        {
+          "point_id": "kinf-300K",
+          "temperature_K": 300.0,
+          "pressure_regime": "high_pressure_limit",
+          "reference_rate": 8.0e-12,
+          "rate_units": "cm^3 molecule^-1 s^-1",
+          "reference_uncertainty_factor": 1.2,
+          "source_index": 0
+        }
+      ]
+    },
+    {
+      "case_id": "methyl-recombination-electronic-state-undeclared-v1",
+      "partition": "challenge",
+      "problem_class": "barrierless_association_electronic_state_ambiguous",
+      "reaction_equation": "CH3 + CH3 -> C2H6",
+      "environment": {
+        "phase": "gas"
+      },
+      "expected_provider_disposition": "unresolved",
+      "required_unresolved_reason": "electronic_state_coupling_undeclared",
+      "reference_sources": [
+        {
+          "citation": "Klippenstein group PAPR VaReCoF program documentation and cited VRC-TST formalism papers.",
+          "url": "https://tcg.cse.anl.gov/papr/codes/varecof.html",
+          "source_kind": "official_method_documentation",
+          "reference_scope": "VRC-TST requires an explicitly defined fragment interaction/electronic-state model; this challenge intentionally withholds that declaration."
+        }
+      ],
+      "reference_points": []
+    }
+  ],
+  "pending_cases": [
+    {
+      "case_id": "h-o2-association-n2-300K-falloff-v1",
+      "curation_status": "reference_data_pending",
+      "observable_kind": "falloff_curve",
+      "problem_class": "barrierless_association_pressure_dependent",
+      "reaction_equation": "H + O2 (+N2) -> HO2 (+N2)",
+      "environment": {
+        "phase": "gas",
+        "bath_gas": "N2",
+        "temperature_K": 300.0,
+        "pressure_grid_bar": [
+          0.001,
+          0.003,
+          0.01,
+          0.03,
+          0.1,
+          0.3,
+          1.0,
+          3.0,
+          10.0
+        ]
+      },
+      "reference_sources": [
+        {
+          "citation": "Michael et al., J. Phys. Chem. A 106, 5297-5313 (2002), DOI 10.1021/jp020229w.",
+          "url": "https://doi.org/10.1021/jp020229w",
+          "source_kind": "primary_experiment",
+          "reference_scope": "Bath-gas-resolved H + O2 association measurements and energy-transfer analysis; numerical N2 falloff values still require independent extraction and review."
+        }
+      ],
+      "missing_reference_data": [
+        "independently digitized finite-pressure rate values",
+        "pointwise or correlated experimental uncertainties",
+        "documented pressure-unit and bath-gas conversions",
+        "second-person verification of extracted values"
+      ],
+      "promotion_rule": "Move into cases only after values and uncertainties are independently extracted, reviewed, and frozen before provider comparison."
+    }
+  ],
+  "known_gaps": [
+    "No locked holdout partition has been curated.",
+    "The first full falloff case is preregistered but remains explicitly reference-data-pending.",
+    "Reference correlations and mechanism ambiguity are not yet represented.",
+    "Passing this development set cannot authorize a supported capture lane."
+  ]
+}

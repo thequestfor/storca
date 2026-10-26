@@ -1,19 +1,26 @@
 import unittest
 from unittest.mock import patch
+from propagation_fixtures import isothermal_model
 
 from storca.flux_verification import (
     assess_repaired_mechanism,
     assess_target_loss_commitment,
     assess_t95_robustness,
     build_flux_ranked_verification_plan,
+    prepare_combined_prediction_rate_bounds,
+    prepare_combined_unresolved_rate_bounds,
     reaction_signature,
+    run_collision_limit_rate_envelope,
     run_combined_unresolved_sensitivity,
+    run_combined_prediction_rate_sensitivity,
+    run_t95_sensitivity_attribution,
     verify_applied_replacement,
 )
 from storca.generated_kinetics import validate_rate_replacement_evidence
 
 
 CONDITIONS = {
+    "contract_id": "sha256:flux-fixture-condition",
     "temperature_K": 298.15,
     "pressure_bar": 1.0,
     "retention_fraction": 0.95,
@@ -39,6 +46,7 @@ def replacement(route_id, *, rate=1.0e9, collision=2.0e9):
 def propagation(*, t95=100.0, final=0.80, flux=True):
     result = {
         "status": "completed",
+        "reactor_model": isothermal_model(),
         "coverage": {"complete": True, "requested_seconds": 1000.0, "simulated_seconds": 1000.0},
         "estimated_time_to_retention_seconds": t95,
         "target_profile": [
@@ -78,6 +86,124 @@ def rmg_evidence(*, flux=True):
 
 
 class FluxVerificationTests(unittest.TestCase):
+    @staticmethod
+    def _add_sensitivities(evidence, *, r1=0.1, r2=2.0):
+        evidence["independent_cantera_propagation"]["reaction_sensitivity_attribution"] = {
+            "status": "completed",
+            "reactions": [
+                {
+                    "reaction_equation": "A(2) + stability(1) <=> P1(3)",
+                    "absolute_log_t95_sensitivity": r1,
+                },
+                {
+                    "reaction_equation": "B(4) + stability(1) <=> P2(5)",
+                    "absolute_log_t95_sensitivity": r2,
+                },
+            ],
+        }
+
+    @staticmethod
+    def _uncertainty(route_id, *, lower=0.5, upper=2.0, cost=None, units=None, model=None):
+        return {
+            "route_id": route_id,
+            "lower_rate_multiplier": lower,
+            "upper_rate_multiplier": upper,
+            "source": "test calibration",
+            "source_kind": "method_calibration",
+            "applicability": "test fixture chemistry",
+            "condition_contract_id": CONDITIONS["contract_id"],
+            "estimated_cost": cost,
+            "cost_units": units,
+            "cost_model": model,
+        }
+
+    def test_complete_uncertainty_and_sensitivity_prioritize_observable_impact(self):
+        evidence = rmg_evidence()
+        self._add_sensitivities(evidence)
+        plan = build_flux_ranked_verification_plan(
+            evidence,
+            CONDITIONS,
+            rate_uncertainties=[self._uncertainty("r1"), self._uncertainty("r2")],
+        )
+        self.assertEqual(
+            plan["allocation_policy"]["status"],
+            "observable_uncertainty_priority_active",
+        )
+        self.assertEqual(plan["controlling_route_id"], "r2")
+        self.assertEqual(plan["selected_route_id"], "r2")
+        self.assertGreater(
+            plan["ranked_routes"][0]["observable_priority"]["raw_observable_impact_proxy"],
+            plan["ranked_routes"][1]["observable_priority"]["raw_observable_impact_proxy"],
+        )
+
+    def test_missing_uncertainty_falls_back_without_treating_route_as_certain(self):
+        evidence = rmg_evidence()
+        self._add_sensitivities(evidence, r1=0.1, r2=2.0)
+        plan = build_flux_ranked_verification_plan(
+            evidence,
+            CONDITIONS,
+            rate_uncertainties=[self._uncertainty("r2")],
+        )
+        self.assertEqual(plan["allocation_policy"]["status"], "fallback_incomplete_evidence")
+        self.assertEqual(plan["allocation_policy"]["missing_rate_uncertainty_route_ids"], ["r1"])
+        # This is exactly the prior sensitivity-first fallback, not an
+        # uncertainty score which silently assigns r1 zero uncertainty.
+        self.assertEqual(plan["selected_route_id"], "r2")
+
+    def test_comparable_explicit_cost_can_change_allocation_order(self):
+        evidence = rmg_evidence()
+        self._add_sensitivities(evidence, r1=1.0, r2=2.0)
+        plan = build_flux_ranked_verification_plan(
+            evidence,
+            CONDITIONS,
+            rate_uncertainties=[
+                self._uncertainty("r1", cost=1.0, units="core_hour", model="orca_profile_v1"),
+                self._uncertainty("r2", cost=10.0, units="core_hour", model="orca_profile_v1"),
+            ],
+        )
+        self.assertEqual(plan["allocation_policy"]["cost_normalization"]["status"], "active")
+        self.assertEqual(plan["selected_route_id"], "r1")
+
+    def test_unbounded_influential_rate_is_prioritized_without_fake_finite_score(self):
+        evidence = rmg_evidence()
+        self._add_sensitivities(evidence, r1=0.1, r2=0.2)
+        plan = build_flux_ranked_verification_plan(
+            evidence,
+            CONDITIONS,
+            rate_uncertainties=[
+                self._uncertainty("r1", lower=0.0),
+                self._uncertainty("r2"),
+            ],
+        )
+        self.assertEqual(plan["selected_route_id"], "r1")
+        priority = plan["ranked_routes"][0]["observable_priority"]
+        self.assertEqual(priority["uncertainty_status"], "unbounded_downward")
+        self.assertIsNone(priority["raw_observable_impact_proxy"])
+
+    def test_exact_condition_uncertainty_overrides_general_ladder_record(self):
+        evidence = rmg_evidence()
+        self._add_sensitivities(evidence)
+        conditions = {**CONDITIONS, "contract_id": "sha256:condition-a"}
+        general = self._uncertainty("r1", upper=100.0)
+        # This intentionally global ladder record is an explicit user bound,
+        # not a calibration whose prose can establish its condition domain.
+        general.update(source_kind="user_supplied", condition_contract_id=None)
+        exact = {
+            **self._uncertainty("r1", upper=2.0),
+            "condition_contract_id": "sha256:condition-a",
+        }
+        plan = build_flux_ranked_verification_plan(
+            evidence,
+            conditions,
+            rate_uncertainties=[general, exact, {
+                **self._uncertainty("r2"), "condition_contract_id": conditions["contract_id"],
+            }],
+        )
+        route = next(item for item in plan["ranked_routes"] if item["route_id"] == "r1")
+        self.assertEqual(route["rate_uncertainty_evidence"]["upper_rate_multiplier"], 2.0)
+        self.assertEqual(route["observable_priority"]["match_basis"], "condition_specific_route_id")
+        self.assertEqual(len(plan["allocation_policy"]["unmatched_applicable_records"]), 1)
+
     def test_partial_rmg_enumeration_queues_only_direct_atom_balanced_route(self):
         evidence = {
             "status": "incomplete",
@@ -108,6 +234,12 @@ class FluxVerificationTests(unittest.TestCase):
         self.assertTrue(plan["partial_enumeration"])
         self.assertEqual(plan["selected_route_id"], "direct")
         self.assertEqual([item["route_id"] for item in plan["ranked_routes"]], ["direct"])
+        exhausted = build_flux_ranked_verification_plan(
+            evidence, CONDITIONS, deferred_route_ids=["direct"],
+        )
+        self.assertEqual(exhausted["direct_candidate_count"], 1)
+        self.assertEqual(exhausted["deferred_direct_route_ids"], ["direct"])
+        self.assertIn("already verified or deferred", exhausted["rule"])
 
     def test_reaction_signature_is_orientation_and_order_independent(self):
         self.assertEqual(
@@ -246,6 +378,33 @@ class FluxVerificationTests(unittest.TestCase):
         flux["reactions"][1]["integrated_target_destruction_kmol"] = 8.0
         conditions = {**CONDITIONS, "composition": {"stability": 0.01, "oxygen": 0.99}}
         plan = build_flux_ranked_verification_plan(evidence, conditions)
+        self.assertEqual(plan["controlling_route_id"], "r2")
+        self.assertEqual(plan["selected_route_id"], "r1")
+        self.assertEqual(plan["ordered_dependency_route_ids"], ["r1", "r2"])
+
+    def test_observable_priority_cannot_bypass_generated_reactant_prerequisite(self):
+        evidence = rmg_evidence()
+        evidence["candidate_routes"][0].update({
+            "resolved_endpoints": {
+                "reactants": [{"label": "stability(1)"}, {"label": "oxygen(2)"}],
+                "products": [{"label": "P1(3)"}, {"label": "R(6)"}],
+            },
+            "co_reactants": [{"label": "oxygen(2)", "origin": "initial_scenario_species"}],
+        })
+        evidence["candidate_routes"][1].update({
+            "resolved_endpoints": {
+                "reactants": [{"label": "stability(1)"}, {"label": "R(6)"}],
+                "products": [{"label": "P2(5)"}],
+            },
+            "co_reactants": [{"label": "R(6)", "origin": "generated_intermediate"}],
+        })
+        self._add_sensitivities(evidence, r1=0.01, r2=10.0)
+        conditions = {**CONDITIONS, "composition": {"stability": 0.01, "oxygen": 0.99}}
+        plan = build_flux_ranked_verification_plan(
+            evidence,
+            conditions,
+            rate_uncertainties=[self._uncertainty("r1"), self._uncertainty("r2")],
+        )
         self.assertEqual(plan["controlling_route_id"], "r2")
         self.assertEqual(plan["selected_route_id"], "r1")
         self.assertEqual(plan["ordered_dependency_route_ids"], ["r1", "r2"])
@@ -520,6 +679,99 @@ class FluxVerificationTests(unittest.TestCase):
         self.assertEqual(result["t95_seconds"], 100.0)
 
     @patch("storca.rmg_bridge_client.run_rmg_bridge")
+    def test_collision_limit_envelope_bounds_observable_without_validating_rate(self, bridge):
+        evidence = rmg_evidence()
+        evidence["artifacts"] = {"chemkin": "chem.inp", "species_dictionary": "dictionary.txt"}
+        evidence["kinetics_validation"] = {
+            "status": "kinetics_unreliable",
+            "violation_count": 1,
+            "condition_mechanism_validation": {
+                "violators": [{
+                    "reaction_index": 7,
+                    "reaction_equation": "HO2 + HO2 <=> O2 + H2O2",
+                    "direction": "forward",
+                    "rate_coefficient_si": 34.0,
+                    "collision_limit_si": 1.0,
+                    "rate_to_collision_limit_ratio": 34.0,
+                }],
+            },
+        }
+        bounded = []
+        for loss, absolute in ((0.001, 1.0e-7), (0.002, 2.0e-7)):
+            item = propagation(t95=None, final=1.0 - loss)
+            item["target_loss_fraction"] = loss
+            item["reaction_flux_attribution"].update({
+                "initial_target_amount_kmol": 1.0,
+                "numerical_closure_absolute_error_kmol": absolute,
+            })
+            bounded.append(item)
+        bridge.side_effect = bounded
+        condition = {
+            **CONDITIONS,
+            "composition": {"stability": 0.01, "A": 0.99},
+            "target_label": "stability",
+            "target_duration_seconds": 1000.0,
+        }
+
+        result = run_collision_limit_rate_envelope(
+            evidence, condition, rmg_env="rmg_env",
+        )
+
+        self.assertEqual(result["status"], "completed")
+        self.assertTrue(result["observable_classification_robust"])
+        self.assertAlmostEqual(result["maximum_loss_upper_bound_fraction"], 0.0020002)
+        self.assertEqual(bridge.call_args_list[0].args[0]["reaction_multipliers"], {"7": 0.0})
+        self.assertEqual(
+            bridge.call_args_list[1].args[0]["reaction_multipliers"], {"7": 1.0 / 34.0},
+        )
+        self.assertIn("do not verify exact rates", result["interpretation"])
+
+    def test_collision_limit_envelope_fails_closed_without_indexed_violator(self):
+        evidence = rmg_evidence()
+        evidence["kinetics_validation"] = {
+            "status": "kinetics_unreliable", "violation_count": 1,
+        }
+        result = run_collision_limit_rate_envelope(
+            evidence,
+            {**CONDITIONS, "composition": {"stability": 1.0},
+             "target_duration_seconds": 1000.0},
+            rmg_env="rmg_env",
+        )
+        self.assertEqual(result["status"], "incomplete")
+        self.assertFalse(result.get("observable_classification_robust", False))
+        self.assertEqual(result["reason"], "indexed_collision_limit_violators_missing")
+
+    @patch("storca.rmg_bridge_client.run_rmg_bridge")
+    def test_local_t95_sensitivity_uses_two_sided_retained_mechanism_perturbations(self, bridge):
+        evidence = rmg_evidence()
+        evidence["artifacts"] = {"chemkin": "chem.inp", "species_dictionary": "dictionary.txt"}
+        plan = build_flux_ranked_verification_plan(evidence, CONDITIONS)
+        bridge.side_effect = [
+            propagation(t95=120.0), propagation(t95=80.0),
+            propagation(t95=105.0), propagation(t95=95.0),
+        ]
+        condition = {
+            **CONDITIONS,
+            "composition": {"stability": 0.01, "A": 0.49, "B": 0.50},
+            "target_label": "stability",
+            "target_duration_seconds": 1000.0,
+        }
+        result = run_t95_sensitivity_attribution(
+            evidence, plan, condition, route_ids=["r1", "r2"], rmg_env="rmg_env",
+        )
+        self.assertEqual(result["status"], "completed")
+        self.assertGreater(
+            result["reactions"][0]["absolute_log_t95_sensitivity"],
+            result["reactions"][1]["absolute_log_t95_sensitivity"],
+        )
+        self.assertEqual(
+            bridge.call_args_list[0].args[0]["reaction_multipliers"], {"0": 0.5},
+        )
+        self.assertEqual(
+            bridge.call_args_list[1].args[0]["reaction_multipliers"], {"0": 2.0},
+        )
+
+    @patch("storca.rmg_bridge_client.run_rmg_bridge")
     def test_combined_sensitivity_uses_only_explicit_retained_rate_bounds(self, bridge):
         evidence = rmg_evidence()
         evidence["artifacts"] = {"chemkin": "chem.inp", "species_dictionary": "dictionary.txt"}
@@ -537,6 +789,122 @@ class FluxVerificationTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(bridge.call_args_list[0].args[0]["reaction_multipliers"], {"1": 0.0})
         self.assertEqual(bridge.call_args_list[1].args[0]["reaction_multipliers"], {"1": 2.0})
+
+    def test_combined_bound_preparation_uses_retained_rate_and_explicit_uncertainty(self):
+        evidence = rmg_evidence()
+        evidence["candidate_routes"][1]["retained_rate_evidence"] = {
+            "rate_coefficient_si": 4.0,
+            "rate_units": "s^-1",
+        }
+        plan = build_flux_ranked_verification_plan(
+            evidence,
+            CONDITIONS,
+            verified_replacements=[replacement("r1")],
+            rate_uncertainties=[self._uncertainty("r2", lower=0.0, upper=3.0)],
+            flux_coverage_target=0.75,
+        )
+        prepared = prepare_combined_unresolved_rate_bounds(evidence, plan)
+        self.assertEqual(prepared["status"], "completed")
+        self.assertEqual(prepared["unresolved_route_ids"], ["r2"])
+        self.assertEqual(prepared["rate_bounds"][0]["baseline_rate"], 4.0)
+        self.assertEqual(prepared["rate_bounds"][0]["lower_rate"], 0.0)
+        self.assertEqual(prepared["rate_bounds"][0]["upper_rate"], 12.0)
+
+    def test_combined_bound_preparation_fails_without_baseline_units(self):
+        evidence = rmg_evidence()
+        plan = build_flux_ranked_verification_plan(
+            evidence,
+            CONDITIONS,
+            verified_replacements=[replacement("r1")],
+            rate_uncertainties=[self._uncertainty("r2")],
+            flux_coverage_target=0.75,
+        )
+        prepared = prepare_combined_unresolved_rate_bounds(evidence, plan)
+        self.assertEqual(prepared["status"], "incomplete")
+        self.assertIn(
+            "positive_retained_baseline_rate_missing",
+            prepared["blocking_routes"][0]["reasons"],
+        )
+
+    @patch("storca.rmg_bridge_client.run_rmg_bridge")
+    def test_prediction_envelope_includes_verified_calculated_rate_uncertainty(self, bridge):
+        evidence = rmg_evidence()
+        evidence["artifacts"] = {"chemkin": "chem.inp", "species_dictionary": "dictionary.txt"}
+        plan = build_flux_ranked_verification_plan(
+            evidence,
+            CONDITIONS,
+            verified_replacements=[replacement("r1")],
+            rate_uncertainties=[
+                self._uncertainty("r1", lower=0.5, upper=2.0),
+                self._uncertainty("r2", lower=0.0, upper=3.0),
+            ],
+            flux_coverage_target=0.75,
+        )
+        prepared = prepare_combined_prediction_rate_bounds(
+            plan, rate_uncertainty_required_route_ids=["r1"],
+        )
+        self.assertEqual(prepared["status"], "completed")
+        self.assertEqual(prepared["uncertain_route_ids"], ["r1", "r2"])
+        bridge.side_effect = [propagation(t95=108.0), propagation(t95=94.0)]
+        condition = {
+            **CONDITIONS, "composition": {"stability": 0.01, "A": 0.99},
+            "target_label": "stability", "target_duration_seconds": 1000.0,
+        }
+        envelope = run_combined_prediction_rate_sensitivity(
+            evidence, condition, prepared_bounds=prepared, rmg_env="rmg_env",
+        )
+        self.assertEqual(
+            bridge.call_args_list[0].args[0]["reaction_multipliers"],
+            {"0": 0.5, "1": 0.0},
+        )
+        self.assertEqual(
+            bridge.call_args_list[1].args[0]["reaction_multipliers"],
+            {"0": 2.0, "1": 3.0},
+        )
+        robust = assess_t95_robustness(
+            evidence, plan, retention_fraction=0.95,
+            unresolved_sensitivity_envelope=envelope,
+            rate_uncertainty_required_route_ids=["r1"],
+            relative_tolerance=0.20,
+        )
+        self.assertEqual(robust["status"], "robust_verified_t95")
+        self.assertEqual(robust["uncertain_verified_route_ids"], ["r1"])
+
+    def test_calculated_rate_without_uncertainty_cannot_support_robust_t95(self):
+        evidence = rmg_evidence()
+        plan = build_flux_ranked_verification_plan(
+            evidence, CONDITIONS,
+            verified_replacements=[replacement("r1"), replacement("r2")],
+        )
+        result = assess_t95_robustness(
+            evidence, plan, retention_fraction=0.95,
+            rate_uncertainty_required_route_ids=["r1"],
+        )
+        self.assertEqual(result["status"], "not_robust")
+        self.assertEqual(result["reason"], "combined_prediction_rate_sensitivity_missing")
+        self.assertEqual(result["uncertain_verified_route_ids"], ["r1"])
+
+    def test_pressure_rate_uncertainty_must_cover_declared_model_components(self):
+        evidence = rmg_evidence()
+        partial = self._uncertainty("r1", lower=0.5, upper=2.0)
+        partial["uncertainty_components"] = ["electronic_structure"]
+        plan = build_flux_ranked_verification_plan(
+            evidence, CONDITIONS,
+            verified_replacements=[replacement("r1")],
+            rate_uncertainties=[partial, self._uncertainty("r2")],
+        )
+        prepared = prepare_combined_prediction_rate_bounds(
+            plan,
+            rate_uncertainty_required_route_ids=["r1"],
+            required_uncertainty_components_by_route={
+                "r1": ["electronic_structure", "energy_transfer", "transport"],
+            },
+        )
+        self.assertEqual(prepared["status"], "incomplete")
+        self.assertIn(
+            "uncertainty_components_missing:energy_transfer,transport",
+            prepared["blocking_routes"][0]["reasons"],
+        )
 
     def test_repaired_mechanism_rejects_unloaded_replacement_and_collision_warning(self):
         evidence = rmg_evidence()
@@ -584,6 +952,7 @@ class FluxVerificationTests(unittest.TestCase):
         }]}}
         result = verify_applied_replacement(evidence, item, CONDITIONS)
         self.assertEqual(result["status"], "passed")
+        self.assertEqual(result["reaction_identity_basis"], "legacy_normalized_equation_labels")
         evidence["mechanism_inspection"]["reactions"][0]["evaluated_forward_rate_coefficient_si"] = 8.0
         result = verify_applied_replacement(evidence, item, CONDITIONS)
         self.assertEqual(result["status"], "failed")
@@ -607,6 +976,94 @@ class FluxVerificationTests(unittest.TestCase):
         result = verify_applied_replacement(evidence, item, CONDITIONS)
         self.assertEqual(result["status"], "passed")
         self.assertEqual(result["applied_direction"], "reverse")
+
+    @patch("storca.reaction_correspondence.resolve_replacement_correspondence")
+    def test_structural_correspondence_replaces_labels_not_rate_or_condition_checks(self, resolve):
+        item = {
+            "route_id": "native-original", "reaction_equation": "parent => product",
+            "molecularity": 1, "source_library": "verified-channel",
+            "condition_rate": {"value": 4.0, "units": "s^-1"},
+        }
+        candidate = {
+            "reaction_index": 17, "equation": "renamed(5) => resonance_form(8)",
+            "molecularity": 1, "evaluated_forward_rate_coefficient_si": 4.0,
+            "evaluated_at": {"temperature_K": 298.15, "pressure_bar": 1.0},
+            "source_library": "verified-channel",
+        }
+        evidence = {"mechanism_inspection": {"reactions": [candidate]}}
+        correspondence = {"source_route_id": "native-original", "reaction_index": 17}
+        resolve.return_value = {
+            "status": "matched", "candidate": candidate, "applied_direction": "forward",
+            "source_oriented_equation": candidate["equation"],
+            "source_route_id": "native-original", "correspondence": correspondence,
+            "blocking_reasons": [],
+        }
+        result = verify_applied_replacement(evidence, item, CONDITIONS)
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual(result["reaction_identity_basis"], "resonance_aware_structure_correspondence")
+        self.assertEqual(result["identity_resolution"]["correspondence"], correspondence)
+        self.assertEqual(result["matched_reaction_index"], 17)
+        self.assertTrue(result["library_provenance_checked"])
+        for key, value, blocker in (
+            ("evaluated_forward_rate_coefficient_si", 8.0, "applied_rate_does_not_match_replacement"),
+            ("molecularity", 2, "applied_reaction_molecularity_mismatch"),
+            ("source_library", "unrelated", "applied_rate_library_provenance_mismatch"),
+            ("evaluated_at", {"temperature_K": 500.0, "pressure_bar": 1.0}, "applied_rate_condition_mismatch"),
+        ):
+            with self.subTest(key=key):
+                previous = candidate[key]
+                candidate[key] = value
+                result = verify_applied_replacement(evidence, item, CONDITIONS)
+                self.assertEqual(result["status"], "failed")
+                self.assertIn(blocker, result["blocking_reasons"])
+                candidate[key] = previous
+
+    @patch("storca.reaction_correspondence.resolve_replacement_correspondence")
+    def test_failed_structural_evidence_cannot_fall_back_to_matching_labels(self, resolve):
+        item = {
+            "route_id": "native-original", "reaction_equation": "parent => product",
+            "molecularity": 1, "condition_rate": {"value": 4.0, "units": "s^-1"},
+        }
+        evidence = {"mechanism_inspection": {"reactions": [{
+            "reaction_index": 2, "equation": "parent => product", "molecularity": 1,
+            "evaluated_forward_rate_coefficient_si": 4.0,
+            "evaluated_at": {"temperature_K": 298.15, "pressure_bar": 1.0},
+        }]}}
+        resolve.return_value = {
+            "status": "failed", "blocking_reasons": ["correspondence_artifact_hash_mismatch"],
+        }
+        result = verify_applied_replacement(evidence, item, CONDITIONS)
+        self.assertEqual(result["status"], "failed")
+        self.assertIsNone(result["matched_reaction_index"])
+        self.assertIn("correspondence_artifact_hash_mismatch", result["blocking_reasons"])
+        self.assertEqual(result["reaction_identity_basis"], "unresolved_structural_correspondence")
+
+    @patch("storca.reaction_correspondence.resolve_replacement_correspondence")
+    def test_structural_reverse_match_uses_reverse_molecularity_and_rate(self, resolve):
+        item = {
+            "route_id": "native-original", "reaction_equation": "parent => product1 + product2",
+            "molecularity": 1, "condition_rate": {"value": 4.0, "units": "s^-1"},
+        }
+        candidate = {
+            "reaction_index": 17, "equation": "renamed1(5) + renamed2(8) <=> renamed_parent(3)",
+            "molecularity": 2, "reverse_molecularity": 1,
+            "evaluated_forward_rate_coefficient_si": 9.0,
+            "evaluated_reverse_rate_coefficient_si": 4.0,
+            "evaluated_at": {"temperature_K": 298.15, "pressure_bar": 1.0},
+        }
+        resolve.return_value = {
+            "status": "matched", "candidate": candidate, "applied_direction": "reverse",
+            "source_oriented_equation": "renamed_parent(3) <=> renamed1(5) + renamed2(8)",
+            "source_route_id": "native-original", "correspondence": {}, "blocking_reasons": [],
+        }
+        result = verify_applied_replacement({}, item, CONDITIONS)
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual(result["applied_direction"], "reverse")
+        self.assertEqual(result["applied_rate_si"], 4.0)
+        candidate["evaluated_reverse_rate_coefficient_si"] = 9.0
+        result = verify_applied_replacement({}, item, CONDITIONS)
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("applied_rate_does_not_match_replacement", result["blocking_reasons"])
 
 
 if __name__ == "__main__":

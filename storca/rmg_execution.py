@@ -143,6 +143,43 @@ def _finite_number(value: object) -> float | None:
     return number if math.isfinite(number) else None
 
 
+def isothermal_propagation_blockers(propagation: dict, condition_contract: dict) -> list[str]:
+    """Require measured reactor conditions, including for reopened legacy runs.
+
+    Missing proof requires repropagation of the retained mechanism, not a new
+    quantum calculation. Never infer an isothermal reactor from process success
+    or the requested input temperature: legacy Cantera runs used energy=on.
+    Tolerances are numerical checks, not uncertainty bounds supplied by a cache.
+    """
+    model = propagation.get("reactor_model")
+    if not isinstance(model, dict):
+        return ["propagation_condition_evidence_missing_repropagation_required"]
+    reasons = []
+    if (model.get("policy_id") != "isothermal-ideal-gas-constant-pressure-v1"
+            or model.get("energy_enabled") is not False
+            or model.get("condition_validation") != "passed"):
+        reasons.append("propagation_isothermal_model_unverified")
+    for field, range_field, relative, absolute in (
+        ("temperature_K", "observed_temperature_range_K", 1e-10, 1e-8),
+        ("pressure_bar", "observed_pressure_range_bar", 1e-9, 1e-12),
+    ):
+        expected = _finite_number(condition_contract.get(field))
+        requested = _finite_number(model.get(field))
+        observed = model.get(range_field)
+        if (expected is None or expected <= 0 or requested is None or requested <= 0
+                or not math.isclose(requested, expected, rel_tol=relative, abs_tol=absolute)):
+            reasons.append(f"propagation_{field}_contract_mismatch")
+            continue
+        bounds = ([_finite_number(value) for value in observed]
+                  if isinstance(observed, (list, tuple)) and len(observed) == 2 else [])
+        if (len(bounds) != 2 or any(value is None or value <= 0 for value in bounds)
+                or bounds[0] > bounds[1]
+                or any(not math.isclose(value, expected, rel_tol=relative, abs_tol=absolute)
+                       for value in bounds)):
+            reasons.append(f"propagation_{field}_observed_range_invalid")
+    return reasons
+
+
 def validate_inspected_collision_rates(
     mechanism_inspection: dict | None,
     *,

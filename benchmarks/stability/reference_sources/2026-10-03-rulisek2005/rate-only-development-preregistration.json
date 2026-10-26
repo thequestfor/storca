@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "kind": "storca_rate_only_development_preregistration",
+  "registered_date": "2026-10-03",
+  "case_id": "furan-maleimide-solution-rulisek2005",
+  "partition": "development",
+  "predictions_inspected_at_registration": false,
+  "holdout_locked": false,
+  "support_claim_allowed": false,
+  "calibration_claim_allowed": false,
+  "scope": "Descriptive, condition-matched comparison of eight source-fitted concentration-law coefficients. Not a final scientific acceptance gate, activity-based intrinsic-rate calibration, microscopic mechanism validation or autonomous stability demonstration.",
+  "reference_audit": {
+    "path": "source-audit-v2.json",
+    "sha256": "2bd77f2d7d1bdd680cefc64bb6c143566a883f013f7f66aea50883781c460a04"
+  },
+  "observation_ids": [
+    "table2-IV-forward-300K", "table2-IV-reverse-300K",
+    "table2-V-forward-300K", "table2-V-reverse-300K",
+    "table3-IV-forward-338K", "table3-IV-reverse-338K",
+    "table3-V-forward-338K", "table3-V-reverse-338K"
+  ],
+  "prediction_request": {
+    "chemical_system": {
+      "initial_species": [
+        {"name": "furan", "smiles": "c1ccoc1", "charge": 0, "multiplicity": 1},
+        {"name": "maleimide", "smiles": "O=C1NC(=O)C=C1", "charge": 0, "multiplicity": 1}
+      ],
+      "pathway_injection_allowed": false,
+      "structural_identity_status": "Declared genuine starting reactants; no adduct, pathway or expected product supplied. Native structural admission remains required."
+    },
+    "conditions": {
+      "phase": "solution",
+      "temperature_grid_K": [300, 338],
+      "solvent": "acetonitrile-d3",
+      "solvent_isotopic_formula": "CD3CN",
+      "pressure_bar": null,
+      "atmosphere": "argon",
+      "light_condition": "not_reported",
+      "standard_state_mol_L": 1.0
+    },
+    "requested_observables": ["condition_matched_rate_coefficients"],
+    "budget": {}
+  },
+  "scoring_policy": {
+    "kind": "descriptive_rate_only_development",
+    "rate_convention": "concentration_mass_action",
+    "exact_isotopic_solvent_required": true,
+    "all_registered_rates_remain_in_denominator": true,
+    "accuracy_threshold": null,
+    "coverage_threshold": null,
+    "cost_threshold": null,
+    "scientific_acceptance_pass": null,
+    "experimental_fit_intervals_may_define_prediction_error": false,
+    "macroscopic_observables_admitted": false
+  },
+  "production_evidence_requirements": [
+    "Reopen the retained producer JSON and its calculation hashes; extract the coefficient rather than trusting a number in a benchmark result.",
+    "Require consistent rate/path claim identities and upstream verified saddle/endpoint/frequency/IRC evidence. The evaluator checks retained contracts, not quantum output physics anew.",
+    "Require a scoring-only audited structural assignment of channel, direction and stereoisomer, linked to the production claim and its evidence. It must not be dispatched as a supplied pathway.",
+    "Require exact temperature, CD3CN declaration, molecularity, coefficient units, one-molar theoretical standard state and concentration-law convention.",
+    "Require an artifact-backed applicable or explicitly conditional method assessment. Unresolved/outside applicability cannot supply a point score; conditional scores remain separately counted.",
+    "Ordinary CH3CN or an unstated isotope model cannot silently substitute for CD3CN. A future surrogate policy requires a separate sourced applicability/discrepancy review and pre-prediction amendment.",
+    "Finite producer execution budgets and measured cost evidence remain required. This offline preregistration grants no chemistry budget or execution permission."
+  ],
+  "unknowns_preserved": [
+    "Exact initial concentrations and reaction pressure",
+    "Concentrated-solution activities and systematic NMR calibration error",
+    "Joint covariance and complete experimental uncertainty",
+    "Original publisher/author PDF archive",
+    "Automatic source-stereoisomer assignment from production structures"
+  ],
+  "exclusions": [
+    "No concentration, lifetime, t95, half-life, retention or time-dependent branching comparator",
+    "No independent-normal uncertainty propagation from the 0.9545 joint-fit half-widths",
+    "No coverage, calibration, support or prospective-holdout promotion",
+    "No inferred missing pathway or proof of microscopic mechanism from rate agreement"
+  ],
+  "amendment_policy": "Preserve this preregistration. A source/condition/identity/policy correction requires a dated predecessor-hashed amendment, never a silent change after inspecting production predictions."
+}

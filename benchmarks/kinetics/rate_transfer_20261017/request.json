@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "kind": "storca_rate_transfer_preparation_request",
+  "candidate_recipe": {
+    "path": "/Users/benilarraza/orca-multiwfn-automation/runs/oh-methane-candidate-freeze-20261017-complete/candidate.json",
+    "sha256": "2cdc2464e0be231775d5f30ede126bd4ac74b18ee64ba0304d6b03c48f09d4fa"
+  },
+  "reference_curation": {
+    "path": "/Users/benilarraza/orca-multiwfn-automation/benchmarks/kinetics/transfer_reference_curation_20261017/curation.json",
+    "sha256": "e308ddf228af2b756cbc00578039ea1978826aa629735e8c2f18d23e1cf3da93"
+  }
+}

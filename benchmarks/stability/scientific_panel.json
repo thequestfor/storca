@@ -1,0 +1,262 @@
+{
+  "schema_version": 1,
+  "kind": "storca_scientific_panel_curation",
+  "status": "development_curation_in_progress",
+  "holdout_locked": false,
+  "support_claim_allowed": false,
+  "evaluation_harness": {
+    "module": "storca/scientific_panel.py",
+    "driver": "tests/run_scientific_panel.py",
+    "maximum_case_count": 12,
+    "mode": "offline_retained_prediction_scoring",
+    "request_export": "explicit_input_projection_without_scoring_references",
+    "eligible_reference_policy": "Explicit per-case scoring record required; curation entries remain pending.",
+    "p1_reference_policy": "Optional existing P1 preregistration supplies a provisional descriptive comparator while its source audit remains pending.",
+    "support_or_calibration_promotion_allowed": false
+  },
+  "scope": "P2 source-backed development panel. Not a completed benchmark, mechanism ground truth, or admitted execution input.",
+  "acceptance_thresholds": null,
+  "remaining_panel_gaps": [
+    "Freeze conditions, numeric targets, acceptance thresholds and held-out partition before predictions.",
+    "Add a neutral homogeneous-solution case within the present lane scope.",
+    "Add a separately sourced solvent-assisted mechanism challenge.",
+    "Add quantitative competing-path branching evidence.",
+    "Complete experimental uncertainty and applicability review; unknown uncertainties are not zero."
+  ],
+  "cases": [
+    {
+      "case_id": "cyclopentadiene-solution-szekeres1977",
+      "partition": "development",
+      "classes": ["solution", "neutral", "dimerization", "solvent_mixture", "concentration_decay"],
+      "system": "Cyclopentadiene dimerization in a light hydrocarbon fraction",
+      "source": "https://pp.bme.hu/ch/article/view/3079",
+      "source_pdf": "https://pp.bme.hu/ch/article/download/3079/2184",
+      "source_location": "Printed pages 19–20; rate constants listed immediately before Table 2",
+      "source_kind": "primary_experiment",
+      "reference_status": "prose_rates_transcribed_environment_and_convention_review_pending",
+      "rate_units": "dm^3 mol^-1 h^-1",
+      "rate_convention": "Reported slope of reciprocal CPD concentration versus time; do not equate directly to elementary reaction-extent rate for 2 CPD -> dimer.",
+      "reference_points": [
+        {"temperature_K": 333.15, "source_temperature_C": 60, "rate": 0.065},
+        {"temperature_K": 353.15, "source_temperature_C": 80, "rate": 0.267},
+        {"temperature_K": 373.15, "source_temperature_C": 100, "rate": 0.960},
+        {"temperature_K": 393.15, "source_temperature_C": 120, "rate": 3.000}
+      ],
+      "experimental_uncertainty": null,
+      "pressure_bar": null,
+      "limitations": [
+        "Solvent is a hydrocarbon fraction, not a declared pure solvent; do not substitute hexane silently.",
+        "Reaction pressure is not the reported chromatography carrier pressure.",
+        "Resolve concentration-loss versus reaction-extent factor of two before scoring.",
+        "Table concentration trajectories require visual transcription review.",
+        "Not a frozen benchmark or validation of the current implicit-solution lane."
+      ]
+    },
+    {
+      "case_id": "ethyl-acetate-aqueous-saponification-meng2009",
+      "partition": "development",
+      "classes": ["solution", "bimolecular", "charged_reactant", "concentration_decay"],
+      "system": "Ethyl acetate + aqueous NaOH",
+      "source": "https://doi.org/10.1155/2009/849704",
+      "source_location": "Table 1, experimental columns; Section 5",
+      "source_kind": "primary_experiment",
+      "reference_status": "numeric_table_transcribed_conditions_review_pending",
+      "rate_units": "dm^3 mol^-1 min^-1",
+      "concentration_units": "mol dm^-3",
+      "reference_points": [
+        {"temperature_K": 298, "initial_NaOH": 0.0490, "initial_ethyl_acetate": 0.0490, "rate": 6.864},
+        {"temperature_K": 308, "initial_NaOH": 0.0490, "initial_ethyl_acetate": 0.0490, "rate": 10.643},
+        {"temperature_K": 298, "initial_NaOH": 0.0245, "initial_ethyl_acetate": 0.0196, "rate": 6.926},
+        {"temperature_K": 308, "initial_NaOH": 0.0245, "initial_ethyl_acetate": 0.0196, "rate": 10.834}
+      ],
+      "experimental_uncertainty": null,
+      "limitations": [
+        "The table's delta-percent entries compare reference values; they are not confidence intervals.",
+        "The fitted net rate is not evidence of a single elementary reaction.",
+        "NaOH implies ionic species and a counterion; the current neutral-solution lane must not silently admit this case.",
+        "Pressure, activity, solvent composition and systematic uncertainty require further review.",
+        "Any lifetime calculated from these rates is a model-derived comparator, not an independently measured lifetime."
+      ]
+    },
+    {
+      "case_id": "oh-h2o2-low-temperature-vakhtin",
+      "partition": "development",
+      "classes": ["gas", "radical", "bimolecular", "temperature_dependent_mechanism"],
+      "system": "OH + H2O2 in a nitrogen expansion",
+      "source": "https://www.nist.gov/publications/low-temperature-kinetics-reaction-oh-radical-hydrogen-peroxide-0",
+      "source_kind": "primary_author_abstract",
+      "temperature_range_K": [96, 296],
+      "reference_status": "full_paper_and_uncertainty_notation_review_required",
+      "reference_points": [],
+      "limitations": ["The HTML abstract has malformed uncertainty notation; no numeric uncertainty was inferred.", "Bath density and publication metadata need full-paper verification."]
+    },
+    {
+      "case_id": "cyclobutane-thermal-barnard1974",
+      "partition": "development",
+      "classes": ["gas", "unimolecular_decomposition", "electronic_structure_challenge"],
+      "system": "Cyclobutane thermal decomposition",
+      "source": "https://doi.org/10.1039/F19747001782",
+      "source_kind": "primary_experiment_abstract",
+      "temperature_range_K": [891, 1400],
+      "observed_product": "ethylene",
+      "reference_status": "full_rate_table_pressure_and_uncertainty_required",
+      "reference_points": [],
+      "limitations": ["Observed products do not establish a concerted rather than stepwise microscopic mechanism."]
+    },
+    {
+      "case_id": "cyclopropane-thermal-barnard1974",
+      "partition": "development",
+      "classes": ["gas", "isomerization", "pressure_dependence", "electronic_structure_challenge"],
+      "system": "Cyclopropane thermal isomerization",
+      "source": "https://doi.org/10.1039/F19747001782",
+      "source_kind": "primary_experiment_abstract",
+      "temperature_range_K": [950, 1653],
+      "observed_dominant_product": "propene",
+      "reference_status": "full_rate_table_pressure_and_uncertainty_required",
+      "reference_points": [],
+      "limitations": ["Electronic-structure challenge classification is a benchmark-design hypothesis, not a conclusion established by the experimental abstract."]
+    },
+    {
+      "case_id": "ch3choo-conformer-reactivity-lin2015",
+      "partition": "development",
+      "classes": ["gas", "conformer_specific", "reactivity_ordering"],
+      "system": "syn/anti CH3CHOO with NO/NO2",
+      "source": "https://doi.org/10.1038/ncomms8012",
+      "source_kind": "primary_experiment",
+      "reference_status": "qualitative_challenge_absolute_rates_unavailable_in_source",
+      "reference_audit": {
+        "path": "reference_sources/2026-10-01/source-audit.json",
+        "sha256": "72aaf7347f10428c4f2596a8e9bde5212967628517a075c0bc7b00339fed454a"
+      },
+      "observed_ordering": "anti more reactive than syn toward NO/NO2 under the reported experiment",
+      "reference_points": [],
+      "limitations": ["The authors explicitly cannot determine accurate absolute rate coefficients because probe and photolysis volumes differ.", "Do not equate observed total decay with a pure unimolecular rate or assume rapid conformer equilibration.", "Retain qualitative ordering as a challenge; an independent quantitative source is required for rate scoring."]
+    },
+    {
+      "case_id": "myrcene-acrylic-acid-solution-hornung2017",
+      "partition": "development",
+      "classes": ["solution", "neutral_reactants", "bimolecular", "concentrated_solution", "temperature_dependent", "solvent_comparison"],
+      "system": "beta-myrcene + acrylic acid in ethyl acetate or toluene",
+      "source": "https://doi.org/10.3762/bjoc.13.15",
+      "source_kind": "primary_experiment",
+      "source_location": "Main Table 2, printed page 122; SI Table S1, page S5; SI Equations S1-S3, page S3; experimental procedure, page 125",
+      "reference_status": "six_numeric_observations_visually_audited_applicability_and_preregistration_pending",
+      "reference_audit": {
+        "path": "reference_sources/2026-10-01/source-audit.json",
+        "sha256": "72aaf7347f10428c4f2596a8e9bde5212967628517a075c0bc7b00339fed454a"
+      },
+      "rate_units": "L mol^-1 s^-1",
+      "reference_points_location": "Frozen source audit, audited_observation_sets/myrcene-acrylic-acid-solution-hornung2017/observations",
+      "rate_convention": "Apparent reciprocal-myrcene-concentration slope under near-equimolar approximation; not automatically an elementary-channel rate.",
+      "experimental_uncertainty": null,
+      "limitations": [
+        "Batch reaction uses sealed microwave vials; batch pressure is unreported, and flow-reactor pressure must not be substituted.",
+        "Reactant concentrations are 2.8-2.9 mol/L and myrcene stock purity is 90%; concentrated-solution activities, acid association and unknown impurities require assessment.",
+        "Unknown experimental uncertainty is not zero. Do not derive a confidence interval from table rounding or temperature variation.",
+        "Numeric observations are frozen, but execution conditions, budget, applicability and thresholds have not been preregistered; no scoring record is admitted."
+      ]
+    },
+    {
+      "case_id": "furan-maleimide-solution-rulisek2005",
+      "partition": "development",
+      "classes": ["solution", "neutral", "bimolecular", "reverse_unimolecular", "reversible", "competing_stereoisomers", "rate_only", "isotopic_solvent"],
+      "system": "Furan + maleimide and reversible endo/exo adduct formation in acetonitrile-d3",
+      "source": "https://doi.org/10.1021/jo050759z",
+      "source_kind": "primary_experiment_kinetic_model_fit",
+      "source_location": "Tables 2-3, page 6298; experimental procedure, page 6296; model and fitting caveats, pages 6297-6299",
+      "reference_status": "eight_fitted_rate_only_observations_visually_audited_protocol_and_applicability_pending",
+      "reference_audit": {
+        "path": "reference_sources/2026-10-03-rulisek2005/source-audit-v2.json",
+        "sha256": "2bd77f2d7d1bdd680cefc64bb6c143566a883f013f7f66aea50883781c460a04"
+      },
+      "reference_points_location": "Frozen source audit, audited_observation_sets/furan-maleimide-solution-rulisek2005/observations",
+      "temperature_grid_K": [300, 338],
+      "solvent_isotopic_formula": "CD3CN",
+      "fit_uncertainty_convention": "Source-reported joint confidence limits at probability 0.9545; not independent marginal Gaussian errors or complete experimental uncertainty.",
+      "experimental_total_uncertainty": null,
+      "limitations": [
+        "Numerical initial concentrations are not needed to retain source-fitted rate coefficients, but are not supplied as exact execution inputs for concentration-time, lifetime or product-distribution tests.",
+        "Keep the actual deuterated solvent; do not silently replace CD3CN by ordinary CH3CN.",
+        "Published values are coefficients of the authors' reversible concentration-law model, not verified microscopic mechanism ground truth or activity-based intrinsic constants.",
+        "Joint covariance, complete systematic uncertainty and reaction pressure are not supplied; the authors note NMR calibration/mass-balance limitations.",
+        "Retained primary-paper visual reproductions are hashed; a complete original publisher or author PDF has not been archived.",
+        "No acceptance protocol, autonomous execution request, support promotion or prospective holdout is admitted by this source audit."
+      ]
+    },
+    {
+      "case_id": "h-o2-association-air-300K-v1",
+      "partition": "development",
+      "classes": ["gas", "radical", "barrierless", "pressure_dependence"],
+      "reference_manifest": "benchmarks/kinetics/specialist_rate_manifest.json",
+      "reference_case_id": "h-o2-association-air-300K-v1",
+      "reference_status": "audited_descriptive_high_pressure_limit_rate_only_comparator",
+      "reference_audit": {
+        "path": "reference_sources/2026-10-06-jpl2011-hpl/source-audit.json",
+        "sha256": "383716999237c973f55bc1790311642d8ef73bc00397c7f0c02eb00de5da2c2d"
+      },
+      "prediction_request": {
+        "chemical_system": {"parent": {"name": "Separated H atom + triplet O2", "smiles": "[H].[O][O]", "charge": 0}},
+        "conditions": {
+          "phase": "gas",
+          "environment": "air",
+          "temperature_K": 300.0,
+          "pressure_bar": null,
+          "pressure_regime": "high_pressure_limit",
+          "initial_composition": [{"smiles": "[H]", "charge": 0, "multiplicity": 2}, {"smiles": "[O][O]", "charge": 0, "multiplicity": 3}]
+        },
+        "requested_observables": ["high_pressure_limit_association_rate_coefficient"],
+        "budget": {}
+      },
+      "scoring": {
+        "reference_status": "audited",
+        "expected_disposition": "prediction",
+        "applicability_assessment": "unresolved",
+        "observable_scope": "rate_only_high_pressure_limit",
+        "rate": {"value": 7.5e-11, "units": "cm^3 molecule^-1 s^-1", "convention": "high_pressure_limit_bimolecular_H_plus_O2_association_coefficient"},
+        "maximum_rate_multiplicative_error": null,
+        "experimental_uncertainty": null,
+        "reference_uncertainty": {
+          "kind": "jpl2011_evaluated_multiplicative_temperature_envelope",
+          "reference_temperature_K": 298.0,
+          "factor_at_reference_temperature": 1.3,
+          "temperature_parameter_K": 50.0,
+          "formula": "f(T) = f(298 K) * exp(g * abs(1/T - 1/298 K))",
+          "factor_at_300_K": 1.30145495228246,
+          "confidence_probability": null,
+          "statistical_distribution": null,
+          "independence_group": "h-o2-association-jpl2011",
+          "storca_rate_error_calibration": false,
+          "interpretation": "Evaluator-assigned envelope, not a rigorous experimental confidence interval. Section 1.2 uses approximate standard-deviation language; Section 2.6 describes a two-sigma coverage objective. Neither supplies an exact probability model."
+        },
+        "provenance": {
+          "citation": "Sander et al., Chemical Kinetics and Photochemical Data for Use in Atmospheric Studies, Evaluation Number 17, JPL Publication 10-6 (2011).",
+          "publisher_url": "https://science.jpl.nasa.gov/documents/1489/JPL_10-6_Final_15June2011_20110620.pdf",
+          "source_kind": "evaluated_kinetic_recommendation_with_theoretical_input",
+          "source_location": "Table 2-1 B1, printed page 2-4; table units, air and f(T) footnotes, page 2-7; complete B1 note, page 2-8."
+        }
+      },
+      "limitations": [
+        "Rate-only high-pressure limit at 300 K, not a finite-pressure decay, falloff, lifetime, product distribution or complete gas validation case.",
+        "Theory-informed historical JPL Evaluation 17 recommendation, not an independent experimentally measured high-pressure point or a claim to use the latest evaluation.",
+        "JPL evaluated uncertainty envelope is not a calibrated STORCA error factor or an exact probability distribution; complete experimental uncertainty remains unknown.",
+        "No applicable capture provider, coupled entrance surface, execution budget, acceptance threshold, holdout or support claim is established by this frozen reference."
+      ]
+    },
+    {
+      "case_id": "oh-oh-association-air-300K-v1",
+      "partition": "development",
+      "classes": ["gas", "radical", "barrierless", "pressure_dependence"],
+      "reference_manifest": "benchmarks/kinetics/specialist_rate_manifest.json",
+      "reference_case_id": "oh-oh-association-air-300K-v1",
+      "reference_status": "reuse_existing_evaluated_limits_exact_pressure_curve_pending"
+    },
+    {
+      "case_id": "methyl-o2-association-air-300K-v1",
+      "partition": "development",
+      "classes": ["gas", "radical", "barrierless", "pressure_dependence"],
+      "reference_manifest": "benchmarks/kinetics/specialist_rate_manifest.json",
+      "reference_case_id": "methyl-o2-association-air-300K-v1",
+      "reference_status": "reuse_existing_evaluated_limits_exact_pressure_curve_pending"
+    }
+  ]
+}

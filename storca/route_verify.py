@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field, replace
 import json
 from pathlib import Path
 import re
@@ -50,9 +50,16 @@ class RouteSpec:
     evidence_level: str = "candidate"
     protocol: str = "unsupported_atom_mapping"
     limitation: str | None = None
+    environment: dict[str, Any] = field(default_factory=dict)
+    atom_mapping_evidence: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        value = asdict(self)
+        # Keep historical route/context hashes stable when no new source
+        # evidence exists. Absence is not retroactive recipe provenance.
+        if not self.atom_mapping_evidence:
+            value.pop("atom_mapping_evidence")
+        return value
 
 
 def _radical_multiplicity(smiles: str) -> int:
@@ -193,6 +200,7 @@ def _rmg_spec(parent_smiles: str, route: dict, *, stage: str | None,
         broken_bonds=broken,
         formed_bonds=formed,
         atom_mapping=mapping,
+        atom_mapping_evidence=dict(route.get("atom_mapping_evidence") or {}),
         source_stage=stage,
         kinetic_relevance=relevance,
         estimated_t95_seconds=route_t95,
@@ -202,6 +210,7 @@ def _rmg_spec(parent_smiles: str, route: dict, *, stage: str | None,
         evidence_level=evidence,
         protocol=protocol,
         limitation=limitation,
+        environment=dict(route.get("environment") or {}),
     )
 
 
@@ -214,6 +223,46 @@ def route_spec_from_rmg_route(parent_smiles: str, route: dict, *, stage: str | N
         t95=_float_or_none(route.get("route_t95_seconds")),
         target_loss=_float_or_none(route.get("target_loss_fraction")),
         index=int(route.get("route_index", 0)),
+    )
+
+
+def route_spec_from_candidate_route(
+    parent_smiles: str,
+    route: dict,
+    *,
+    stage: str | None = None,
+) -> RouteSpec:
+    """Normalize a STORCA-native candidate for the existing path verifier.
+
+    Candidate routes deliberately carry the same resolved-endpoint contract as
+    executable RMG routes, but their discovery source and epistemic status are
+    not RMG's.  Keeping this adapter separate makes it impossible for a
+    graph/xTB proposal to masquerade as flux evidence while reusing the
+    family-neutral geometry, TS, frequency, and IRC workflow.
+    """
+    if not route.get("native_candidate_id"):
+        raise ValueError("A native candidate route needs native_candidate_id")
+    spec = _rmg_spec(
+        parent_smiles,
+        route,
+        stage=stage,
+        t95=None,
+        target_loss=None,
+        index=0,
+    )
+    if not spec.product_smiles or not route.get("resolved_endpoints"):
+        raise ValueError("Native candidate route lacks resolved endpoint SMILES")
+    if spec.protocol != "generic_endpoint_path":
+        raise ValueError("Native candidate route is not executable by the generic endpoint path workflow")
+    return replace(
+        spec,
+        source=str(route.get("source") or "native_candidate"),
+        kinetic_relevance="unknown",
+        evidence_level="candidate",
+        limitation=(
+            "This is a source-neutral reaction candidate with unknown kinetic relevance. "
+            "It requires TS, frequency, IRC, rate generation, and model repropagation before it can support a kinetic claim."
+        ),
     )
 
 

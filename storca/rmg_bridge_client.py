@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-import subprocess
 import sys
 import tempfile
 
@@ -19,7 +18,8 @@ def run_rmg_bridge(payload: dict, *, rmg_env: str | None, timeout_seconds: float
         handle.flush()
         command = (["conda", "run", "-n", rmg_env, "python", str(script), "--payload", handle.name] if rmg_env
                    else [sys.executable, str(script), "--payload", handle.name])
-        completed = subprocess.run(command, text=True, capture_output=True, timeout=timeout_seconds)
+        from src.orca_runner import run_bounded_kinetics_command
+        completed = run_bounded_kinetics_command(command, timeout_seconds=timeout_seconds)
     if completed.returncode:
         raise RuntimeError(f"RMG bridge failed with exit code {completed.returncode}: {completed.stderr.strip()}")
     try:

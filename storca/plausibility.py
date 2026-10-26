@@ -17,6 +17,27 @@ AMBIENT_DEFAULTS = {
 }
 
 
+def electronic_state_parity(smiles: str, *, charge: int, multiplicity: int) -> dict:
+    """Return the exact electron-parity gate for a declared molecular state."""
+    if multiplicity < 1:
+        raise ValueError("Multiplicity must be at least one")
+    from rdkit import Chem
+
+    description = describe_smiles(smiles)
+    molecule = Chem.MolFromSmiles(description["canonical_smiles"])
+    if molecule is None:
+        raise ValueError(f"Invalid SMILES: {smiles}")
+    explicit = Chem.AddHs(molecule)
+    electron_count = sum(atom.GetAtomicNum() for atom in explicit.GetAtoms()) - int(charge)
+    parity_consistent = (electron_count % 2 == 0) == (int(multiplicity) % 2 == 1)
+    return {
+        "canonical_smiles": description["canonical_smiles"],
+        "electron_count": int(electron_count),
+        "spin_parity_consistent": bool(parity_consistent),
+        "description": description,
+    }
+
+
 def create_plausibility_dossier(
     smiles: str,
     *,
@@ -30,14 +51,10 @@ def create_plausibility_dossier(
     the chemical state and records exactly which RMG/ORCA evidence is still
     required before any non-abstaining category can be assigned.
     """
-    if multiplicity < 1:
-        raise ValueError("Multiplicity must be at least one")
-    from rdkit import Chem
-
-    description = describe_smiles(smiles)
-    molecule = Chem.MolFromSmiles(description["canonical_smiles"])
-    electron_count = sum(atom.GetAtomicNum() for atom in molecule.GetAtoms()) - charge
-    parity_consistent = (electron_count % 2 == 0) == (multiplicity % 2 == 1)
+    state = electronic_state_parity(smiles, charge=charge, multiplicity=multiplicity)
+    description = state["description"]
+    electron_count = state["electron_count"]
+    parity_consistent = state["spin_parity_consistent"]
     resolved_conditions = {**AMBIENT_DEFAULTS, **(conditions or {})}
     return {
         "schema_version": 1,

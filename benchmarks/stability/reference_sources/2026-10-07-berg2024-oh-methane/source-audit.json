@@ -1,0 +1,172 @@
+{
+  "schema_version": 1,
+  "kind": "storca_scientific_panel_reference_audit",
+  "audit_date": "2026-10-07",
+  "status": "primary_measured_rate_transcription_frozen_proposed_panel_addition_not_applied",
+  "prediction_inputs_allowed": false,
+  "support_claim_allowed": false,
+  "calibration_claim_allowed": false,
+  "prospective_holdout": false,
+  "predictions_inspected_during_curation": false,
+  "sources": [
+    {
+      "source_id": "berg2024-primary-paper",
+      "citation": "Berg, F., Novelli, A., Dubus, R., Hofzumahaus, A., Holland, F., Wahner, A., and Fuchs, H. (2024). Temperature-dependent rate coefficients for the reactions of OH radicals with selected alkanes, aromatic compounds, and monoterpenes. Atmospheric Chemistry and Physics 24, 13715-13731. doi:10.5194/acp-24-13715-2024.",
+      "url": "https://acp.copernicus.org/articles/24/13715/2024/acp-24-13715-2024.pdf",
+      "publisher_url": "https://acp.copernicus.org/articles/24/13715/2024/",
+      "path": "acp-24-13715-2024.pdf",
+      "sha256": "60b4889aa36009766334a298d91242872a1ffe1166503634e90f7cddeef3a692",
+      "size_bytes": 3025703,
+      "source_kind": "primary_absolute_gas_rate_experiment",
+      "license": "CC BY 4.0, original PDF page 1",
+      "retrieved_date": "2026-10-07",
+      "visual_audit": {
+        "verified": true,
+        "method": "Complete relevant original-PDF pages rendered locally with bundled Poppler and independently viewed, not search snippets or reconstructed tables.",
+        "pdf_pages": [1, 2, 3, 4, 5, 6, 7],
+        "printed_pages": [13715, 13716, 13717, 13718, 13719, 13720, 13721],
+        "locations": ["Title, authors, publication date and license", "Sections 2.1-2.3 complete experimental methods, concentration measurement and artefact discussion", "Section 3.1 methane composition and kinetic convention", "Figure 3 and complete Table 1 with caption, units, bath gas, pressure and This work row"]
+      }
+    },
+    {
+      "source_id": "berg2024-primary-supplement",
+      "citation": "Supplement of Berg et al. (2024), doi:10.5194/acp-24-13715-2024-supplement, Table S1.",
+      "url": "https://acp.copernicus.org/articles/24/13715/2024/acp-24-13715-2024-supplement.pdf",
+      "path": "acp-24-13715-2024-supplement.pdf",
+      "sha256": "3e9187588e82789d5d7f7b10a0b127ef69979e5b99e46053c26b1e1e9f6eee17",
+      "size_bytes": 383788,
+      "source_kind": "primary_individual_absolute_rate_measurements",
+      "license": "CC BY 4.0; cover notes individual parts may have different copyright. Table S1 contains this study's original measurements.",
+      "retrieved_date": "2026-10-07",
+      "visual_audit": {
+        "verified": true,
+        "pdf_pages": [1, 2],
+        "printed_pages": ["cover", "1"],
+        "locations": ["Cover provenance and license", "Complete Table S1 caption, two canister columns, units and all fourteen methane measurements; adjacent tables inspected to avoid wrong-species transcription"]
+      }
+    }
+  ],
+  "audited_observation_sets": [
+    {
+      "case_id": "berg2024-oh-methane-air-340p3K-rate-v1",
+      "partition": "development",
+      "source_ids": ["berg2024-primary-paper", "berg2024-primary-supplement"],
+      "transcription_frozen": true,
+      "quantitative_scoring_ready": true,
+      "quantitative_readiness_scope": "Descriptive central bimolecular coefficient only, not experimental confidence or method applicability.",
+      "observable_scope": "rate_only_measured_bimolecular_coefficient",
+      "full_finite_pressure_fate_scoring_ready": false,
+      "full_fate_scoring_ready": false,
+      "system": "Separated hydroxyl radical and methane",
+      "observable": "Absolute bimolecular OH-loss coefficient k_OH+CH4, after subtraction of the measured instrumental zero-decay coefficient; not the pseudo-first-order decay coefficient in s^-1.",
+      "source_location": "Supplement Table S1, printed page 1 (PDF page 2); main Eq. 2 and uncertainty paragraph, printed page 13718 (PDF page 4); methane mixing ratio, printed page 13720 (PDF page 6); main Table 1, printed page 13721 (PDF page 7).",
+      "source_conditions": {
+        "phase": "gas",
+        "reaction_pressure_hPa": 1000,
+        "reaction_pressure_bar": 1.0,
+        "pressure_regime": "finite_pressure_experimental_nominal",
+        "pressure_uncertainty_hPa": null,
+        "per_point_pressure_record_available": false,
+        "pressure_provenance": "Main Table 1 This work row explicitly reports 1000 hPa. The abstract's 1 atm is retained as approximate wording, not replaced by 1013.25 hPa.",
+        "bath_gas": "humidified synthetic air prepared from nitrogen and oxygen",
+        "nitrogen_oxygen_exact_mole_fractions": null,
+        "bath_gas_feed_purity_percent_lower_bound": 99.9999,
+        "methane_mixing_ratio_ppmv": 63,
+        "methane_feed_purity_percent": 99.5,
+        "methane_concentration_measurement": "Picarro G2401 cavity ring-down spectroscopy; methane was not quantified by the TOC method",
+        "water_mixing_ratio_percent_at_primary_point_340p3K": 1.3,
+        "water_mixing_ratio_qualifier": "approximately",
+        "lowest_temperature_humidity_note": "Methods report 0.8% at the nominal 280 K setpoint. S1's lowest actual methane temperatures are 286.0 and 284.4 K; no per-point humidity is tabulated, so a unique exact humidity is not assigned to those rows.",
+        "ozone_mixing_ratio_ppbv_range": [20, 50],
+        "initial_OH_number_density_cm_minus3_approximate": 3e9,
+        "initial_OH_density_qualifier": "generic methods value, not a per-point measurement",
+        "total_flow_L_min": 20,
+        "residence_time_s_upper_bound": 2,
+        "OH_production": "266 nm ozone flash photolysis followed by O(1D)+H2O; 20 mJ pulses at 1 Hz",
+        "OH_detection": "308 nm LIF in a separate downstream cell at 3.5 hPa; this is not the reaction pressure",
+        "zero_decay_coefficient_s_minus1_approximate": 2.5,
+        "zero_decay_measured_before_each_coefficient": true
+      },
+      "rate_convention": {
+        "source_formula": "k_OH+X = (k_decay - k_zero) / [X]",
+        "source_printed_units": "10^-14 cm^3 s^-1 in Table S1",
+        "canonical_units": "cm^3 molecule^-1 s^-1",
+        "normalization_basis": "Molecular number density: Eq. 2 divides a first-order OH decay coefficient by reactant number density. The implicit per-molecule convention is made explicit, not converted from molar units.",
+        "observable_equation": "-d[OH]/dt = k_OH+CH4 [OH][CH4] for the methane-dependent loss component",
+        "symmetry_or_site_division_applied": false,
+        "full_network_or_product_evidence": false
+      },
+      "observations": [
+        {"point_id": "S1-A-01", "canister": "A", "source_row": 1, "temperature_K": 340.3, "temperature_plus_minus_K": 0.6, "rate": 1.40e-14, "source_rate_value_in_1e_minus14": 1.40, "published_rate_plus_minus": 0.07e-14, "rate_units": "cm^3 molecule^-1 s^-1"},
+        {"point_id": "S1-A-02", "canister": "A", "source_row": 2, "temperature_K": 331.1, "temperature_plus_minus_K": 0.5, "rate": 1.12e-14, "source_rate_value_in_1e_minus14": 1.12, "published_rate_plus_minus": 0.05e-14, "rate_units": "cm^3 molecule^-1 s^-1"},
+        {"point_id": "S1-A-03", "canister": "A", "source_row": 3, "temperature_K": 321.7, "temperature_plus_minus_K": 0.5, "rate": 0.99e-14, "source_rate_value_in_1e_minus14": 0.99, "published_rate_plus_minus": 0.05e-14, "rate_units": "cm^3 molecule^-1 s^-1"},
+        {"point_id": "S1-A-04", "canister": "A", "source_row": 4, "temperature_K": 312.4, "temperature_plus_minus_K": 0.4, "rate": 0.83e-14, "source_rate_value_in_1e_minus14": 0.83, "published_rate_plus_minus": 0.04e-14, "rate_units": "cm^3 molecule^-1 s^-1"},
+        {"point_id": "S1-A-05", "canister": "A", "source_row": 5, "temperature_K": 303.1, "temperature_plus_minus_K": 0.4, "rate": 0.73e-14, "source_rate_value_in_1e_minus14": 0.73, "published_rate_plus_minus": 0.03e-14, "rate_units": "cm^3 molecule^-1 s^-1"},
+        {"point_id": "S1-A-06", "canister": "A", "source_row": 6, "temperature_K": 293.8, "temperature_plus_minus_K": 0.5, "rate": 0.62e-14, "source_rate_value_in_1e_minus14": 0.62, "published_rate_plus_minus": 0.03e-14, "rate_units": "cm^3 molecule^-1 s^-1"},
+        {"point_id": "S1-A-07", "canister": "A", "source_row": 7, "temperature_K": 286.0, "temperature_plus_minus_K": 0.6, "rate": 0.50e-14, "source_rate_value_in_1e_minus14": 0.50, "published_rate_plus_minus": 0.02e-14, "rate_units": "cm^3 molecule^-1 s^-1"},
+        {"point_id": "S1-B-01", "canister": "B", "source_row": 1, "temperature_K": 340.7, "temperature_plus_minus_K": 0.6, "rate": 1.32e-14, "source_rate_value_in_1e_minus14": 1.32, "published_rate_plus_minus": 0.06e-14, "rate_units": "cm^3 molecule^-1 s^-1"},
+        {"point_id": "S1-B-02", "canister": "B", "source_row": 2, "temperature_K": 331.4, "temperature_plus_minus_K": 0.5, "rate": 1.14e-14, "source_rate_value_in_1e_minus14": 1.14, "published_rate_plus_minus": 0.05e-14, "rate_units": "cm^3 molecule^-1 s^-1"},
+        {"point_id": "S1-B-03", "canister": "B", "source_row": 3, "temperature_K": 322.0, "temperature_plus_minus_K": 0.5, "rate": 0.96e-14, "source_rate_value_in_1e_minus14": 0.96, "published_rate_plus_minus": 0.04e-14, "rate_units": "cm^3 molecule^-1 s^-1"},
+        {"point_id": "S1-B-04", "canister": "B", "source_row": 4, "temperature_K": 312.5, "temperature_plus_minus_K": 0.4, "rate": 0.84e-14, "source_rate_value_in_1e_minus14": 0.84, "published_rate_plus_minus": 0.04e-14, "rate_units": "cm^3 molecule^-1 s^-1"},
+        {"point_id": "S1-B-05", "canister": "B", "source_row": 5, "temperature_K": 303.2, "temperature_plus_minus_K": 0.4, "rate": 0.71e-14, "source_rate_value_in_1e_minus14": 0.71, "published_rate_plus_minus": 0.03e-14, "rate_units": "cm^3 molecule^-1 s^-1"},
+        {"point_id": "S1-B-06", "canister": "B", "source_row": 6, "temperature_K": 293.8, "temperature_plus_minus_K": 0.4, "rate": 0.60e-14, "source_rate_value_in_1e_minus14": 0.60, "published_rate_plus_minus": 0.03e-14, "rate_units": "cm^3 molecule^-1 s^-1"},
+        {"point_id": "S1-B-07", "canister": "B", "source_row": 7, "temperature_K": 284.4, "temperature_plus_minus_K": 0.5, "rate": 0.48e-14, "source_rate_value_in_1e_minus14": 0.48, "published_rate_plus_minus": 0.03e-14, "rate_units": "cm^3 molecule^-1 s^-1"}
+      ],
+      "primary_comparator_selection": {
+        "point_id": "S1-A-01",
+        "rule": "First original Table S1 methane row in the first original canister column. Preserve all fourteen rows; do not average, select by prediction agreement, round the measured temperature or evaluate the fitted Arrhenius expression.",
+        "predictions_inspected": false,
+        "one_point_selection_is_not_full_temperature_validation": true
+      },
+      "reference_uncertainty": {
+        "kind": "published_point_plus_minus_with_unresolved_sigma_and_shared_systematics",
+        "point_id": "S1-A-01",
+        "published_rate_plus_minus": 7e-16,
+        "rate_units": "cm^3 molecule^-1 s^-1",
+        "published_temperature_plus_minus_K": 0.6,
+        "point_sigma_multiplier": null,
+        "temperature_sigma_multiplier": null,
+        "confidence_probability": null,
+        "statistical_distribution": null,
+        "total_experimental_uncertainty": null,
+        "shared_systematics_group": "berg2024-oh-methane-all-canisters",
+        "canister_preparation_groups": ["A", "B"],
+        "independent_validation_study_count": 1,
+        "independent_observation_count": null,
+        "storca_rate_error_calibration": false,
+        "methods_general_methane_accuracy": {"relative_percent": 12, "sigma_multiplier_as_reported": 2, "methane_concentration_relative_percent": 8, "concentration_sigma_multiplier_as_reported": 2},
+        "table1_room_temperature_summary_as_printed": {"temperature_K": 294, "rate": 6.1e-15, "rate_plus_minus": 1.0e-15, "sigma_multiplier_in_caption": 2, "rate_units": "cm^3 molecule^-1 s^-1", "selected_as_target": false},
+        "interpretation": "S1 prints per-point plus/minus values without a sigma definition in its caption. Do not assign the main-table 2-sigma caption to S1. Methods state 12% 2-sigma methane accuracy; Table 1's printed 6.1+/-1.0 corresponds to about 16.4%, not 12%. Preserve both, do not repair or choose the smaller uncertainty, and do not claim exact coverage or independent-point calibration."
+      },
+      "scoring_binding": {
+        "rate": {"value": 1.40e-14, "units": "cm^3 molecule^-1 s^-1", "convention": "bimolecular_OH_loss_coefficient_number_density_OH_times_CH4"},
+        "chemical_system": {"parent": {"name": "Separated hydroxyl radical and methane", "smiles": "[OH].C", "charge": 0}},
+        "conditions": {
+          "phase": "gas",
+          "environment": "humidified synthetic air",
+          "temperature_K": 340.3,
+          "pressure_bar": 1.0,
+          "pressure_regime": "finite_pressure_experimental_nominal",
+          "reactor": "temperature-controlled flow tube",
+          "initial_composition": [{"smiles": "[OH]", "charge": 0, "multiplicity": 2}, {"smiles": "C", "mole_fraction": 0.000063, "charge": 0, "multiplicity": 1}],
+          "added_bath_gas": "Synthetic air (N2/O2 exact ratio unreported); approximately 1.3% H2O; O3 20-50 ppbv."
+        },
+        "requested_observables": ["bimolecular_OH_loss_rate_coefficient"],
+        "permitted_scoring_observables": ["rate"],
+        "scoring_constraints": {"observable_scope": "rate_only_measured_bimolecular_coefficient", "applicability_assessment": "unresolved", "maximum_rate_multiplicative_error": null, "experimental_uncertainty": null}
+      },
+      "limitations": [
+        "Experimental finite-pressure coefficient at nominal 1000 hPa, not a measured high-pressure limiting rate or proof of pressure independence. Reaction pressure is not the 3.5 hPa detector or 350 kPa preparation-canister pressure.",
+        "Exact N2/O2 ratio, per-point pressure and composition uncertainties, raw fluorescence curves and a shared systematic covariance matrix are not given here. Nominal reported composition is not silently completed with air fractions or ozone midpoint.",
+        "The paper discusses impurities and does not exclude a larger influence from highly reactive trace contaminants; published accuracy is not an independently verified bound on all errors.",
+        "S1 point errors are not total calibrated confidence intervals; Table 1 and methods accuracy differ. These are retained observations, not zero uncertainty or a tuned acceptance tolerance.",
+        "OH+CH4 is chemically plausible for the existing conventional gas TS/frequency/IRC and Arkane boundary. No independent atom-mapped candidate, verified stationary points, rate, total path degeneracy or method applicability has been produced for this case.",
+        "A gas high-pressure TST result cannot be renamed as this finite-pressure measured coefficient without a retained applicability argument. H-transfer tunneling, OH electronic-state statistical weights, symmetry-equivalent total loss rather than a per-H path, recrossing and model accuracy remain unresolved.",
+        "No reference product identity, expected route, fitted Arrhenius coefficients or source evidence may be exported as production input. No parent lifetime, product distribution, full flow-tube chemistry or elementary-mechanism ground truth is scored.",
+        "One proposed scalar panel comparator does not validate the fourteen-point temperature dependence. All measurements remain frozen together as one source study, not fourteen independent validation cases.",
+        "No chemistry execution budget, acceptance threshold, prospective holdout, supported-network claim or uncertainty calibration is created."
+      ]
+    }
+  ],
+  "amendment_policy": "Unapplied proposal only. Preserve source bytes and all fourteen points. A correction requires a new dated audit with predecessor hashes; never adjust reference selection or uncertainty after a prediction."
+}

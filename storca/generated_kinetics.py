@@ -8,6 +8,8 @@ import math
 from pathlib import Path
 import subprocess
 
+from .arkane_rotor import validate_rotor_evidence
+
 
 def _checksum(path: Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
@@ -37,9 +39,9 @@ def write_photolysis_library(
     labels = [(reactant_label, reactant_smiles), *products]
     if len({label for label, _ in labels}) != len(labels):
         raise ValueError("Generated library species labels must be unique")
-    # A photon source has no thermal reverse process.  Writing ``=>`` rather
-    # than a reversible Chemkin arrow prevents RMG from regenerating the
-    # chromophore through an invented detailed-balance reverse reaction.
+    # A photon source has no thermal reverse process.  RMG requires the
+    # irreversible arrow AND reversible=False: its entry loader defaults to
+    # reversible=True and rejects an arrow that contradicts that declaration.
     reaction_label = f"{reactant_label} => {' + '.join(label for label, _ in products)}"
     reaction_file = library / "reactions.py"
     dictionary_file = library / "dictionary.txt"
@@ -54,6 +56,7 @@ Evidence: {Path(photolysis_evidence).resolve()}
 entry(
     index = 1,
     label = "{reaction_label}",
+    reversible = False,
     kinetics = Arrhenius(A = ({photolysis_rate_constant_s_1!r}, 's^-1'), n = 0, Ea = (0, 'kcal/mol'), T0 = (1, 'K')),
     shortDesc = u"Calculated spectral photolysis source",
     longDesc = u"""Calculated from retained spectrum, cross section, quantum yield, and transmission evidence.""",
@@ -74,7 +77,8 @@ entry(
 
 
 def validate_generated_library(path: Path, *, temperature_K: float | None = None,
-                               pressure_bar: float | None = None) -> dict:
+                               pressure_bar: float | None = None,
+                               condition_contract: dict | None = None) -> dict:
     """Validate a generated-library manifest before it is admitted to RMG."""
     path = Path(path)
     manifest_path = path / "generated-kinetics.json"
@@ -86,16 +90,19 @@ def validate_generated_library(path: Path, *, temperature_K: float | None = None
     for name, digest in manifest.get("checksums", {}).items():
         if _checksum(path / name) != digest:
             raise ValueError(f"Generated kinetics checksum mismatch: {name}")
-    if manifest.get("source") == "arkane_pdep":
+    if manifest.get("source") in {"arkane_pdep", "mess_pdep"}:
         minimum, maximum = manifest["temperature_range_K"]
         if temperature_K is not None and not minimum <= temperature_K <= maximum:
-            raise ValueError("Requested temperature lies outside Arkane kinetics grid")
+            raise ValueError("Requested temperature lies outside pressure-dependent kinetics grid")
         minimum, maximum = manifest["pressure_range_bar"]
         if pressure_bar is not None and not minimum <= pressure_bar <= maximum:
-            raise ValueError("Requested pressure lies outside Arkane kinetics grid")
-    if manifest.get("replaces_reaction") or manifest.get("purpose") == "kinetic_repair":
+            raise ValueError("Requested pressure lies outside pressure-dependent kinetics grid")
+    if manifest.get("replaces_reaction") or manifest.get("purpose") == "kinetic_repair" \
+            or str(manifest.get("source") or "").startswith("arkane_") \
+            or str(manifest.get("verification_status") or "").startswith("verified_arkane"):
         validation = validate_rate_replacement_evidence(
             manifest, temperature_K=temperature_K, pressure_bar=pressure_bar,
+            condition_contract=condition_contract,
         )
         if validation["status"] != "passed":
             raise ValueError(
@@ -127,6 +134,7 @@ def validate_rate_replacement_evidence(
     temperature_K: float | None = None,
     pressure_bar: float | None = None,
     collision_tolerance: float = 1e-9,
+    condition_contract: dict | None = None,
 ) -> dict:
     """Validate a condition-specific verified rate before model replacement.
 
@@ -136,9 +144,53 @@ def validate_rate_replacement_evidence(
     prohibited rather than silently converted.
     """
     blockers: list[str] = []
+    approximation = None
+    if "forward_only_approximation_evidence" in evidence:
+        try:
+            from .bounded_handoff import validate_forward_only_approximation_evidence
+            approximation = validate_forward_only_approximation_evidence(evidence, condition_contract)
+        except (ValueError, KeyError, TypeError, OSError, SyntaxError) as error:
+            blockers.append("forward_only_approximation_invalid: " + str(error))
+    # A conformer-specific elementary rate can be physically meaningful while
+    # still being incompatible with a graph-only network's species thermo.
+    # This is an opt-in contract: historical rate records have no such basis,
+    # but an explicit unresolved basis must never become a model repair.
+    if "conformer_rate_basis" in evidence:
+        basis = evidence["conformer_rate_basis"]
+        if (not isinstance(basis, dict)
+                or basis.get("kind") != "reached_endpoint_conformer_rate_basis"
+                or not isinstance(basis.get("network_reinjection_allowed"), bool)):
+            blockers.append("conformer_rate_basis_invalid")
+        elif not basis["network_reinjection_allowed"] and approximation is None:
+            blockers.append("conformer_thermo_basis_unresolved")
     verification_status = str(evidence.get("verification_status") or "")
     if not verification_status.startswith("verified"):
         blockers.append("rate_source_not_verified")
+    statmech_assessment = None
+    if str(evidence.get("source") or "").startswith("arkane_") \
+            or verification_status.startswith("verified_arkane"):
+        try:
+            receipt = validate_rotor_evidence(evidence.get("arkane_statmech_validation"))
+            if receipt.get("route_id") != evidence.get("route_id"):
+                raise ValueError("Arkane statmech receipt belongs to a different route")
+            # Route labels recur across conditions and execution attempts.
+            # Bind the rate's own producing files to this receipt so an old
+            # result cannot borrow a corrected same-label job's admission.
+            sources = evidence.get("arkane_rate_source_artifacts")
+            expected = {name: receipt[name] for name in ("input", "output", "provenance")}
+            if not isinstance(sources, dict) or sources != expected:
+                raise ValueError("Arkane rate sources differ from the statmech receipt")
+            if "conditional_forward_rate_evidence" in evidence:
+                forward = evidence["conditional_forward_rate_evidence"]
+                if not isinstance(forward, dict) or forward.get("route_id") != evidence.get("route_id") \
+                        or not isinstance(forward.get("source_artifacts"), dict) \
+                        or any(forward["source_artifacts"].get(name) != record
+                               for name, record in expected.items()):
+                    raise ValueError("Conditional Arkane rate sources contradict the statmech receipt")
+            statmech_assessment = {"status": "passed", "policy_id": receipt["policy_id"]}
+        except (OSError, ValueError, KeyError, TypeError, SyntaxError) as error:
+            blockers.append("arkane_statmech_validation_missing_or_invalid")
+            statmech_assessment = {"status": "failed", "failure_reason": str(error)}
     route_id = evidence.get("route_id")
     if not route_id:
         blockers.append("replacement_route_id_missing")
@@ -196,4 +248,11 @@ def validate_rate_replacement_evidence(
                              "source": collision.get("source"), "rate_to_limit_ratio": ratio}
                             if molecularity == 2 else {"applicable": False}),
         "blocking_reasons": blockers,
+        **({"arkane_statmech_assessment": statmech_assessment}
+           if statmech_assessment is not None else {}),
+        **({"conformer_rate_basis": evidence["conformer_rate_basis"]}
+           if "conformer_rate_basis" in evidence else {}),
+        **({"forward_only_approximation_assessment": approximation,
+            "claim_scope": "conditional_fixed_kinetic_model_no_physical_lifetime"}
+           if approximation is not None else {}),
     }
